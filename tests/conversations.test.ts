@@ -60,3 +60,49 @@ describe('conversation lifecycle', () => {
     expect(state.messages.length).toBeLessThanOrEqual(24);
   });
 });
+
+it('restores per-action history and drafts without another model call, including after worker restart', async () => {
+  let calls = 0;
+  const { engine, publish } = setup(async function* () { yield `answer ${++calls}`; });
+  const state = engine.start(1, selection, DEFAULT_PREFERENCES, null); await tick();
+  engine.ask(1, state.id, 'translate follow-up'); await tick();
+  engine.draft(1, state.id, 'translate draft');
+  const original = structuredClone(state.messages);
+  engine.change(1, state.id, 'summarize'); await tick();
+  expect(calls).toBe(3); expect(state.draft).toBe('');
+  engine.draft(1, state.id, 'summary draft');
+  engine.change(1, state.id, 'explain'); await tick(); expect(calls).toBe(4);
+  engine.change(1, state.id, 'translate'); await tick();
+  expect(calls).toBe(4); expect(state.messages).toEqual(original); expect(state.draft).toBe('translate draft');
+  engine.change(1, state.id, 'translate'); await tick(); expect(calls).toBe(4);
+  const recovered = setup(async function* () { calls++; yield 'unexpected'; }).engine;
+  recovered.restore(publish.mock.calls.at(-1)![0]);
+  recovered.change(1, state.id, 'summarize'); await tick();
+  expect(calls).toBe(4); expect(recovered.get(1)?.draft).toBe('summary draft');
+});
+it('keeps selection and paragraph results separate and starts a fresh cache for a new selection', async () => {
+  let calls = 0;
+  const { engine } = setup(async function* () { yield `answer ${++calls}`; });
+  const state = engine.start(1, selection, DEFAULT_PREFERENCES, null); await tick();
+  engine.change(1, state.id, undefined, 'paragraph', 'paragraph context'); await tick();
+  expect(calls).toBe(2); expect(state.selection.paragraph).toBe('paragraph context');
+  engine.change(1, state.id, undefined, 'selection'); await tick();
+  expect(calls).toBe(2); expect(state.selection.paragraph).toBeUndefined(); expect(state.messages[0]?.content).toBe('answer 1');
+  engine.change(1, state.id, undefined, 'paragraph'); await tick();
+  expect(calls).toBe(2); expect(state.selection.paragraph).toBe('paragraph context');
+  const next = engine.start(1, { ...selection, text: 'different' }, DEFAULT_PREFERENCES, null, state.id); await tick();
+  expect(calls).toBe(3); expect(next.branches).toBeUndefined();
+});
+it('never mixes late tokens into a different action or silently retries an interrupted cached action', async () => {
+  let release: () => void = () => {};
+  let calls = 0;
+  const { engine } = setup(async function* () {
+    if (++calls === 1) { yield 'partial'; await new Promise<void>(resolve => { release = resolve; }); yield 'stale'; }
+    else yield 'summary';
+  });
+  const state = engine.start(1, selection, DEFAULT_PREFERENCES, null); await tick();
+  engine.change(1, state.id, 'summarize'); await tick(); release(); await tick();
+  expect(state.messages[0]?.content).toBe('summary');
+  engine.change(1, state.id, 'translate'); await tick();
+  expect(state.messages[0]?.content).toBe('partial'); expect(state.status).toBe('interrupted'); expect(calls).toBe(2);
+});

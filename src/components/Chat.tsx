@@ -1,17 +1,20 @@
+import { Select } from './Select';
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowUp, Check, ChevronDown, Copy, Languages, ListFilter, PanelRightOpen, RotateCcw, Settings2, Sparkles, Square, X } from 'lucide-react';
-import { ACTIONS, LIMITS, type Action, type SelectionSnapshot } from '../shared/types';
+import { ArrowUp, GripHorizontal, Check, ChevronDown, Copy, Languages, ListFilter, PanelRightOpen, RotateCcw, Settings2, Sparkles, Square, X } from 'lucide-react';
+import { ACTIONS, LIMITS, type Action } from '../shared/types';
 import { rpc } from '../shared/rpc';
 import type { ChatSession } from '../hooks/useChat';
 import { translator } from '../shared/i18n';
+import type { useFloatingWindow } from '../hooks/useFloatingWindow';
 import { Brand, Mark } from './Brand';
 
 const icons = { translate: Languages, summarize: ListFilter, explain: Sparkles };
-export function Chat({ session, onClose, onPin, pending, onAccept, onDismiss, panel = false }: {
-  session: ChatSession; onClose?: () => void; onPin?: () => void; pending?: SelectionSnapshot | null;
-  onAccept?: () => void; onDismiss?: () => void; panel?: boolean;
+export function Chat({ session, onClose, onPin, windowControls, panel = false }: {
+  windowControls?: ReturnType<typeof useFloatingWindow>;
+  session: ChatSession; onClose?: () => void; onPin?: () => void;
+  panel?: boolean;
 }) {
   const t = translator(session.preferences.uiLanguage);
   const { conversation: chat, connected, error, send, setError } = session;
@@ -24,9 +27,10 @@ export function Chat({ session, onClose, onPin, pending, onAccept, onDismiss, pa
   const scroll = useRef<HTMLDivElement>(null);
   const followScroll = useRef(true);
   const generating = chat?.status === 'generating';
+  const branchId = chat ? `${chat.id}:${chat.action}:${chat.scope}` : undefined;
   useEffect(() => {
-    if (chat?.id !== chatIdRef.current) {
-      chatIdRef.current = chat?.id;
+    if (branchId !== chatIdRef.current) {
+      chatIdRef.current = branchId;
       pendingDraft.current = null;
       draftRef.current = chat?.draft ?? ''; setDraft(draftRef.current);
       followScroll.current = true;
@@ -34,7 +38,7 @@ export function Chat({ session, onClose, onPin, pending, onAccept, onDismiss, pa
       pendingDraft.current = null;
       draftRef.current = chat?.draft ?? ''; setDraft(draftRef.current);
     }
-  }, [chat?.id, chat?.draft]);
+  }, [branchId, chat?.draft]);
   useEffect(() => {
     if (followScroll.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
   }, [chat?.messages, generating]);
@@ -53,15 +57,14 @@ export function Chat({ session, onClose, onPin, pending, onAccept, onDismiss, pa
     catch { setError("复制未成功，请选中回答后手动复制。"); }
   };
   return <section lang={session.preferences.uiLanguage} className={`chat ${panel ? 'chat-panel' : ''}`} aria-label={t("Selio 阅读助手")}>
-    <header className="chat-header"><Brand compact/><span className="header-divider"/><span className="header-caption">{chat ? t(ACTIONS[chat.action]) : t("阅读助手")}</span><div className="header-tools">
+    <header className={`chat-header ${windowControls ? 'draggable-header' : ''}`} onPointerDown={e => { if (windowControls && !(e.target as Element).closest('button')) windowControls.start(e, 'move'); }}><Brand compact/><span className="header-divider"/><span className="header-caption">{chat ? t(ACTIONS[chat.action]) : t("阅读助手")}</span>{windowControls && <button className="icon-button drag-handle" aria-label={t('移动浮窗')} title={t('拖动移动，双击恢复位置和大小')} onPointerDown={e => windowControls.start(e, 'move')} onKeyDown={e => windowControls.keyboard(e)} onDoubleClick={windowControls.reset}><GripHorizontal size={16}/></button>}<div className="header-tools">
       {onPin && <button className="icon-button" title={t("固定到侧边栏")} aria-label={t("固定到侧边栏")} onClick={e => { if (e.isTrusted) onPin(); }}><PanelRightOpen size={17}/></button>}
       <button className="icon-button" title={t("打开设置")} aria-label={t("打开设置")} onClick={() => void rpc('open:options').catch(e => setError(e.message))}><Settings2 size={16}/></button>
       {onClose && <button className="icon-button" aria-label={t("收起浮窗，保留对话")} title={t("收起浮窗，保留对话")} onClick={onClose}><X size={18}/></button>}
     </div></header>
-    {pending && <div className="selection-notice"><div><strong>{t("发现新的选中文字")}</strong><p>{t("切换会结束当前对话，清除这段对话的草稿。")}</p></div><div className="inline-actions"><button className="small-button primary" onClick={e => { if (e.isTrusted) onAccept?.(); }}>{t("切换选区")}</button><button className="small-button" onClick={onDismiss}>{t("保留对话")}</button></div></div>}
     {!chat ? <div className="chat-empty"><span className="empty-mark"><Mark size={42}/></span><h2>{t("让每一次划词，")}<br/>{t("多一点理解。")}</h2><p>{t("在网页中选中文字，点击 Selio 图标。")}<br/>{t("翻译、提炼重点，或继续追问。")}</p><div className="empty-steps"><span>{t("选择文字")}</span><span>→</span><span>{t("获得理解")}</span><span>→</span><span>{t("继续探索")}</span></div><button className="text-button" onClick={() => void rpc('open:options')}>{t("配置模型与网站权限")} <span>↗</span></button></div> : <>
       <div className="action-tabs" role="group" aria-label={t("阅读操作")}>{(Object.keys(ACTIONS) as Action[]).map(action => { const Icon = icons[action]; return <button key={action} className={chat.action === action ? 'active' : ''} disabled={!connected} onClick={e => { if (e.isTrusted && action !== chat.action) send({ type: 'action', action }); }}><Icon size={15}/>{t(ACTIONS[action])}</button>; })}</div>
-      <div className="context-row"><label htmlFor={`scope-${chat.id}`}>{t("发送范围")}</label><select id={`scope-${chat.id}`} value={chat.scope} disabled={!connected} onChange={e => { if (e.nativeEvent.isTrusted) send({ type: 'scope', scope: e.target.value as 'selection' | 'paragraph' }); }}><option value="selection">{t("仅选中文字")}</option><option value="paragraph">{t("选中文字 + 所在段落")}</option></select></div>
+      <div className="context-row"><label htmlFor={`scope-${chat.id}`}>{t("发送范围")}</label><Select id={`scope-${chat.id}`} value={chat.scope} disabled={!connected} onChange={e => { if (e.nativeEvent.isTrusted) send({ type: 'scope', scope: e.target.value as 'selection' | 'paragraph' }); }}><option value="selection">{t("仅选中文字")}</option><option value="paragraph">{t("选中文字 + 所在段落")}</option></Select></div>
       <div className={`source-preview ${expanded ? 'expanded' : ''}`}><button onClick={() => setExpanded(!expanded)} aria-expanded={expanded}><span className="eyebrow">{t("选中文字")} <span>· {chat.selection.text.length.toLocaleString()}  {t("字符")}</span></span><ChevronDown size={14} className={expanded ? 'rotate' : ''}/></button><p>{chat.selection.text}</p>{expanded && chat.scope === 'paragraph' && <p className="paragraph-preview"><strong>{t("发送的段落：")}</strong>{chat.selection.paragraph}</p>}{chat.selection.text.length >= LIMITS.selection && <small>{t("长选区仅保留前")} {LIMITS.selection.toLocaleString()}  {t("字符")}</small>}</div>
       <div className="messages" ref={scroll} onScroll={() => { const el = scroll.current; if (el) followScroll.current = el.scrollHeight - el.scrollTop - el.clientHeight < 70; }} aria-label={t("对话内容")}>
         {chat.messages.map(message => <article key={message.id} className={`message message-${message.role}`}>

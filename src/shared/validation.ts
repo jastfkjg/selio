@@ -52,3 +52,16 @@ export function sanitizeSnapshot(value: SelectionSnapshot): SelectionSnapshot {
 export function siteDisabled(host: string, sites: string[]): boolean {
   return sites.some(s => host === s || host.endsWith(`.${s}`));
 }
+
+// Chrome may combine HTTP/HTTPS grants into a wildcard scheme and hostname.
+export function matchesSitePattern(pattern: string, address: string): boolean {
+  let url: URL;
+  try { url = new URL(address); } catch { return false; }
+  if (!['https:', 'http:'].includes(url.protocol)) return false;
+  if (pattern === '<all_urls>') return true;
+  const match = /^(\*|https?):\/\/([^/]+)\//.exec(pattern);
+  if (!match) return false;
+  const scheme = match[1], host = match[2]!.replace(/:\d+$/, '');
+  if (scheme !== '*' && `${scheme}:` !== url.protocol) return false;
+  return host === '*' || host === url.hostname || host.startsWith('*.') && (url.hostname === host.slice(2) || url.hostname.endsWith(host.slice(1)));
+}

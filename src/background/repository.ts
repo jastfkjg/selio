@@ -60,7 +60,7 @@ export const deleteModel = (id: string) => mutateSettings(async saved => {
   await Promise.all([chrome.storage.local.remove(`key:${id}`), chrome.storage.session.remove(`key:${id}`)]);
 });
 export const savePreferences = (preferences: Preferences) => mutateSettings(async saved => {
-  saved.preferences = { ...validatePreferences(preferences), grantedSites: saved.preferences.grantedSites };
+  saved.preferences = { ...validatePreferences(preferences), grantedSites: saved.preferences.grantedSites, allSites: saved.preferences.allSites };
 });
 export const setDefault = (id: string) => mutateSettings(async saved => {
   if (!saved.models.some(m => m.id === id)) throw new Error('模型配置不存在。');

@@ -5,7 +5,7 @@ import { ApiError, errorMessage } from '../llm/errors';
 
 export interface GenerationContext { modelId: string; modelName: string; stream: (messages: ApiMessage[], signal: AbortSignal) => AsyncIterable<string> }
 interface EngineDependencies {
-  generate: (modelId: string | null) => Promise<GenerationContext>;
+  generate: (modelId: string | null, action: Action) => Promise<GenerationContext>;
   publish: (conversation: Conversation) => void;
 }
 /** One owner per tab, with request identity checked after every async boundary. */
@@ -61,14 +61,28 @@ export class ConversationEngine {
   }
   change(tabId: number, id: string | undefined, action?: Action, scope?: Scope, paragraph?: string) {
     const state = this.require(tabId, id);
+    const nextAction = action ?? state.action;
+    const nextScope = scope ?? state.scope;
+    if (nextAction === state.action && nextScope === state.scope) return;
     this.stop(tabId);
-    if (action) state.action = action;
-    if (scope) state.scope = scope;
-    if (scope === 'paragraph') state.selection.paragraph = cleanText(paragraph || state.selection.text, LIMITS.paragraph);
-    if (scope === 'selection') delete state.selection.paragraph;
-    state.messages = [];
+    const branches = state.branches ??= {};
+    branches[`${state.action}:${state.scope}`] = structuredClone({
+      messages: state.messages, draft: state.draft, status: state.status, error: state.error,
+      modelId: state.modelId, modelName: state.modelName, selection: state.selection,
+    });
+    state.action = nextAction; state.scope = nextScope;
+    const cached = branches[`${nextAction}:${nextScope}`];
+    if (cached) {
+      Object.assign(state, structuredClone(cached));
+      this.emit(state);
+      return;
+    }
+    if (nextScope === 'paragraph') state.selection.paragraph = cleanText(paragraph || state.selection.paragraph || state.selection.text, LIMITS.paragraph);
+    if (nextScope === 'selection') delete state.selection.paragraph;
+    state.messages = []; state.draft = '';
     this.begin(state);
   }
+
   draft(tabId: number, id: string | undefined, text: string) {
     const state = this.require(tabId, id);
     state.draft = text.slice(0, LIMITS.question);
@@ -103,7 +117,7 @@ export class ConversationEngine {
   private async run(state: Conversation, requestId: string, messages: ApiMessage[], controller: AbortController) {
     const current = () => this.get(state.tabId)?.id === state.id && state.requestId === requestId && !controller.signal.aborted;
     try {
-      const generation = await this.dependencies.generate(state.modelId);
+      const generation = await this.dependencies.generate(state.modelId, state.action);
       if (!current()) return;
       state.modelId = generation.modelId;
       state.modelName = generation.modelName;

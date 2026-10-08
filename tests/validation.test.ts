@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { apiEndpoint, validateModel, validatePreferences } from '../src/shared/validation';
+import { apiEndpoint, matchesSitePattern, validateModel, validatePreferences } from '../src/shared/validation';
 import { DEFAULT_PREFERENCES, type ModelConfig } from '../src/shared/types';
 export const model: ModelConfig = { id: 'test-model', name: 'Test', provider: 'custom', baseUrl: 'https://example.com/v1', model: 'mock', maxTokens: 2048, keyStorage: 'session' };
 describe('model configuration', () => {
@@ -31,4 +31,13 @@ it('normalizes native Messages endpoints and enforces provider parameter limits'
 it('validates UI language independently of answer language', () => {
   expect(validatePreferences({ ...DEFAULT_PREFERENCES, uiLanguage: 'en', language: '日本語' })).toMatchObject({ uiLanguage: 'en', language: '日本語' });
   expect(() => validatePreferences({ ...DEFAULT_PREFERENCES, uiLanguage: 'auto' } as unknown as typeof DEFAULT_PREFERENCES)).toThrow();
+});
+
+it.each(['https://*/*', '*://*/*', '<all_urls>', 'https://*.example.com/*', 'https://reader.example.com/*'])('recognizes Chrome grant/revocation pattern %s', pattern => {
+  expect(matchesSitePattern(pattern, 'https://reader.example.com/article')).toBe(true);
+});
+it('does not apply unrelated or unsafe patterns to a page', () => {
+  expect(matchesSitePattern('http://*/*', 'https://reader.example.com/')).toBe(false);
+  expect(matchesSitePattern('https://*.example.com/*', 'https://otherexample.com/')).toBe(false);
+  expect(matchesSitePattern('*://*/*', 'chrome://settings/')).toBe(false);
 });

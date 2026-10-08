@@ -2,14 +2,14 @@ import { defineBackground } from 'wxt/utils/define-background';
 import { ConversationEngine } from '../src/background/conversations';
 import { deleteModel, mutateSettings, protectStorage, readKey, readSaved, saveModel, savePreferences, setDefault, settingsView } from '../src/background/repository';
 import { translator } from '../src/shared/i18n';
-import { adapterFor } from '../src/llm/adapter';
+import { clearUsage, readUsage, recoverUsage, trackedStream } from '../src/background/usage';
 import { ApiError, errorMessage } from '../src/llm/errors';
 import { isAction, originPattern } from '../src/shared/validation';
+import { ALL_SITES } from '../src/shared/types';
 import type { ChatCommand, Conversation, SelectionSnapshot, ServerEvent } from '../src/shared/types';
 
 export default defineBackground(() => {
   const ports = new Map<chrome.runtime.Port, number>();
-  const pending = new Map<number, SelectionSnapshot>();
   const saveTimers = new Map<number, ReturnType<typeof setTimeout>>();
   const writeQueues = new Map<number, Promise<void>>();
   function persist(state: Conversation) {
@@ -26,18 +26,18 @@ export default defineBackground(() => {
     if (state.status === 'generating') saveTimers.set(state.tabId, setTimeout(save, 400));
     else save();
   }
-  function post(port: chrome.runtime.Port, event: ServerEvent | { type: 'proposal'; selection: SelectionSnapshot }) {
+  function post(port: chrome.runtime.Port, event: ServerEvent) {
     try { port.postMessage(event); } catch { ports.delete(port); }
   }
   const engine = new ConversationEngine({
-    async generate(modelId) {
+    async generate(modelId, action) {
       const saved = await readSaved();
       const model = saved.models.find(m => m.id === modelId) ?? saved.models.find(m => m.id === saved.defaultModelId);
       if (!model) throw new ApiError('configuration', '先添加一个模型，即可开始阅读。请打开设置配置 API。');
       const key = await readKey(model);
       if (!key) throw new ApiError('key_missing', '会话密钥已过期，请在设置中重新输入 API Key。');
       if (!await chrome.permissions.contains({ origins: [originPattern(model.baseUrl)] })) throw new ApiError('permission', '尚未授权模型 API 来源，请在设置中编辑并保存模型以授权。');
-      return { modelId: model.id, modelName: model.name, stream: (messages, signal) => adapterFor(model.provider).stream(model, key, messages, signal) };
+      return { modelId: model.id, modelName: model.name, stream: (messages, signal) => trackedStream(model, key, messages, signal, action) };
     },
     publish(state) {
       persist(state);
@@ -45,6 +45,7 @@ export default defineBackground(() => {
     },
   });
   const ready = protectStorage().then(async () => {
+    await recoverUsage();
     const saved = await chrome.storage.session.get(null);
     const liveTabs = new Set((await chrome.tabs.query({})).map(t => t.id));
     for (const [key, value] of Object.entries(saved)) {
@@ -61,10 +62,19 @@ export default defineBackground(() => {
   function syncScripts() {
     const next = syncQueue.then(async () => {
       const { preferences } = await readSaved();
-      const matches = [];
-      if (preferences.autoSelection) for (const origin of preferences.grantedSites) {
-        if (await chrome.permissions.contains({ origins: [origin] })) matches.push(origin);
+      if (preferences.allSites && !await chrome.permissions.contains({ origins: ALL_SITES })) {
+        preferences.allSites = false;
+        await mutateSettings(async saved => { saved.preferences.allSites = false; });
       }
+      const validSites: string[] = [];
+      for (const origin of preferences.grantedSites) {
+        if (await chrome.permissions.contains({ origins: [origin] })) validSites.push(origin);
+      }
+      if (validSites.length !== preferences.grantedSites.length) await mutateSettings(async saved => {
+        const revoked = preferences.grantedSites.filter(origin => !validSites.includes(origin));
+        saved.preferences.grantedSites = saved.preferences.grantedSites.filter(origin => !revoked.includes(origin));
+      });
+      const matches = preferences.autoSelection ? preferences.allSites ? ALL_SITES : validSites : [];
       const registered = await chrome.scripting.getRegisteredContentScripts();
       if (registered.some(s => s.id === 'selio-selection')) await chrome.scripting.unregisterContentScripts({ ids: ['selio-selection'] });
       if (matches.length) await chrome.scripting.registerContentScripts([{ id: 'selio-selection', matches, js: ['content-scripts/content.js'], runAt: 'document_idle', persistAcrossSessions: true }]);
@@ -89,7 +99,11 @@ export default defineBackground(() => {
   chrome.permissions.onRemoved.addListener(removed => {
     void syncScripts();
     void chrome.tabs.query({}).then(tabs => {
-      for (const tab of tabs) if (tab.id !== undefined) void chrome.tabs.sendMessage(tab.id, { type: 'selio:revoked', origins: removed.origins ?? [] }).catch(() => undefined);
+      for (const tab of tabs) {
+        if (tab.id === undefined) continue;
+        void chrome.tabs.sendMessage(tab.id, { type: 'selio:revoked', origins: removed.origins ?? [] }).catch(() => undefined);
+        if (tab.url && /^https?:\/\//.test(tab.url)) void chrome.permissions.contains({ origins: [originPattern(tab.url)] }).then(allowed => { if (allowed) return chrome.tabs.sendMessage(tab.id!, { type: 'selio:enabled' }).catch(() => undefined); });
+      }
     });
   });
 
@@ -101,11 +115,7 @@ export default defineBackground(() => {
     const selection: SelectionSnapshot = { text: info.selectionText.slice(0, 12000), rect: { x: 20, y: 20, width: 0, height: 0 }, pageTitle: tab.title ?? '' };
     void ready.then(async () => {
       const settings = await readSaved();
-      if (!engine.get(tabId)) engine.start(tabId, selection, { ...settings.preferences, scope: 'selection' }, settings.defaultModelId);
-      else {
-        pending.set(tabId, selection);
-        for (const [port, id] of ports) if (id === tabId) post(port, { type: 'proposal', selection });
-      }
+      engine.start(tabId, selection, { ...settings.preferences, scope: 'selection' }, settings.defaultModelId, engine.get(tabId)?.id);
     });
   });
 
@@ -124,7 +134,6 @@ export default defineBackground(() => {
           if (ports.get(port) !== tabId) return;
           await chrome.tabs.get(tabId);
           post(port, { type: 'state', conversation: engine.get(tabId) });
-          if (pending.has(tabId)) post(port, { type: 'proposal', selection: pending.get(tabId)! });
           const saved = await readSaved();
           post(port, { type: 'preferences', preferences: saved.preferences, modelName: saved.models.find(m => m.id === saved.defaultModelId)?.name ?? '未配置模型' });
         }).catch(() => post(port, { type: 'error', error: '该标签页已关闭。' }));
@@ -140,7 +149,6 @@ export default defineBackground(() => {
             if (!command.selection) throw new Error('请先选中文字。');
             const saved = await readSaved();
             engine.start(tabId, command.selection, saved.preferences, saved.defaultModelId, command.conversationId);
-            pending.delete(tabId);
             break;
           }
           case 'ask': if (typeof command.text === 'string') engine.ask(tabId, command.conversationId, command.text); break;
@@ -151,7 +159,7 @@ export default defineBackground(() => {
           case 'scope': {
             if (command.scope !== 'selection' && command.scope !== 'paragraph') break;
             let paragraph: string | undefined;
-            if (command.scope === 'paragraph') {
+            if (command.scope === 'paragraph' && !engine.get(tabId)?.branches?.[`${engine.get(tabId)!.action}:paragraph`]) {
               const state = engine.get(tabId);
               const result = await chrome.tabs.sendMessage(tabId, { type: 'selio:paragraph', text: state?.selection.text }).catch(() => null);
               if (typeof result?.paragraph !== 'string') throw new Error('此选区的段落已不可用，请返回网页重新选择，或保持仅选中文字。');
@@ -180,6 +188,8 @@ export default defineBackground(() => {
       if (!trusted(sender)) throw new Error('此操作只能从 Selio 设置或扩展页面发起。');
       const p = message.payload;
       switch (message.type) {
+        case 'usage:get': return readUsage();
+        case 'usage:clear': await clearUsage(); return [];
         case 'settings:get': return settingsView();
         case 'settings:model': await saveModel(p?.model, p?.key); break;
         case 'settings:delete': if (typeof p !== 'string') throw new Error('模型无效。'); await deleteModel(p); break;
@@ -196,12 +206,19 @@ export default defineBackground(() => {
           const timer = setTimeout(() => controller.abort(), 20000);
           try {
             let received = false;
-            for await (const chunk of adapterFor(model.provider).stream({ ...model, maxTokens: 256 }, key, [{ role: 'user', content: 'Reply only with OK.' }], controller.signal)) {
-              if (chunk.trim()) { received = true; break; }
+            for await (const chunk of trackedStream({ ...model, maxTokens: 256 }, key, [{ role: 'user', content: 'Reply only with OK.' }], controller.signal, 'test')) {
+              if (chunk.trim()) received = true;
             }
             if (!received) throw new ApiError('empty', 'API 未返回文字。');
           } catch (error) { throw new Error(errorMessage(error)); } finally { clearTimeout(timer); controller.abort(); }
           return '连接成功，流式响应正常。';
+        }
+        case 'site:all': {
+          if (typeof p !== 'boolean') throw new Error('偏好设置无效。');
+          if (p && !await chrome.permissions.contains({ origins: ALL_SITES })) throw new Error('网站权限尚未授予。');
+          await mutateSettings(async saved => { saved.preferences.allSites = p; });
+          if (!p) await chrome.permissions.remove({ origins: ALL_SITES });
+          break;
         }
         case 'site:add': {
           if (typeof p !== 'string') throw new Error('网站地址无效。');
@@ -228,10 +245,11 @@ export default defineBackground(() => {
           return;
         }
         case 'data:clear': {
-          engine.clear(); pending.clear();
+          engine.clear();
           for (const timer of saveTimers.values()) clearTimeout(timer);
           saveTimers.clear();
           await Promise.all(writeQueues.values());
+          await clearUsage();
           await chrome.storage.local.clear(); await chrome.storage.session.clear();
           const permissions = await chrome.permissions.getAll();
           if (permissions.origins?.length) await chrome.permissions.remove({ origins: permissions.origins });
@@ -246,7 +264,7 @@ export default defineBackground(() => {
     return true;
   });
   chrome.tabs.onRemoved.addListener(tabId => {
-    engine.remove(tabId); pending.delete(tabId);
+    engine.remove(tabId);
     clearTimeout(saveTimers.get(tabId)); saveTimers.delete(tabId);
     void (writeQueues.get(tabId) ?? Promise.resolve()).then(() => chrome.storage.session.remove(`conversation:${tabId}`));
   });

@@ -1,14 +1,15 @@
-import type { ApiMessage, ModelConfig } from '../shared/types';
+import type { ApiMessage, ModelConfig, TokenUsage } from '../shared/types';
 import { apiEndpoint } from '../shared/validation';
+import { streamUsage } from './usage';
 import { ApiError, httpError } from './errors';
 import { parseAnthropicDelta, parseDelta, sseData } from './sse';
 
 export interface ProviderAdapter {
-  stream(config: ModelConfig, key: string, messages: ApiMessage[], signal: AbortSignal): AsyncIterable<string>;
+  stream(config: ModelConfig, key: string, messages: ApiMessage[], signal: AbortSignal, onUsage?: (usage: TokenUsage) => void): AsyncIterable<string>;
 }
 function adapter(anthropic: boolean): ProviderAdapter {
   return {
-    async *stream(config, key, messages, signal) {
+    async *stream(config, key, messages, signal, onUsage) {
       const controller = new AbortController();
       const relay = () => controller.abort();
       signal.addEventListener('abort', relay, { once: true });
@@ -20,6 +21,7 @@ function adapter(anthropic: boolean): ProviderAdapter {
         const body = {
           model: config.model,
           stream: true,
+          ...(!anthropic ? { stream_options: { include_usage: true } } : {}),
           max_tokens: config.maxTokens,
           ...(config.temperature === undefined ? {} : { temperature: config.temperature }),
           ...(anthropic ? {
@@ -41,10 +43,15 @@ function adapter(anthropic: boolean): ProviderAdapter {
         if (!response.ok) throw httpError(response.status);
         if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream')) throw new ApiError('not_stream', '接口没有返回 SSE 流，请使用所选供应商支持的流式地址。');
         let completed = false;
+        let usage: TokenUsage | undefined;
         for await (const data of sseData(response.body, controller.signal)) {
+          const reported = streamUsage(data, anthropic, usage);
+          if (reported) { usage = reported; onUsage?.(reported); }
           const { text, finished } = (anthropic ? parseAnthropicDelta : parseDelta)(data);
           if (text) yield text;
-          if (finished) { completed = true; break; }
+          // OpenAI usage often arrives after finish_reason and before [DONE].
+          if (finished) completed = true;
+          if (anthropic && finished || data.trim() === '[DONE]') break;
         }
         if (!completed) throw new ApiError('truncated', '连接提前结束，回答可能不完整。请重新生成。');
       } catch (error) {

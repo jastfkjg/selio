@@ -28,7 +28,7 @@ test.beforeAll(async () => {
       req.on('end', () => {
         nativeRequests.push({ ...JSON.parse(body), key: req.headers['x-api-key'], version: req.headers['anthropic-version'] });
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-        res.end('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Native Anthropic response."}}\n\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}\n\ndata: {"type":"message_stop"}\n\n');
+        res.end('data: {"type":"message_start","message":{"usage":{"input_tokens":50,"output_tokens":1}}}\n\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Native Anthropic response."}}\n\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":10}}\n\ndata: {"type":"message_stop"}\n\n');
       });
     } else if (req.url === '/v1/chat/completions') {
       let body = '';
@@ -42,7 +42,7 @@ test.beforeAll(async () => {
         let index = 0;
         const interval = setInterval(() => {
           if (index < pieces.length) res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: pieces[index++] } }] })}\n\n`);
-          else { res.end('data: [DONE]\n\n'); clearInterval(interval); }
+          else { res.end('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120}}\n\ndata: [DONE]\n\n'); clearInterval(interval); }
         }, slow ? 1800 : 160);
         res.on('close', () => clearInterval(interval));
       });
@@ -67,6 +67,11 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await context?.close(); await new Promise<void>(resolve => server?.close(() => resolve())); if (profile) await rm(profile, { recursive: true, force: true }); });
 
+async function choose(page: Page, label: string, option: string) {
+  await page.getByRole('combobox', { name: label, exact: true }).click();
+  await page.getByRole('option', { name: option, exact: true }).click();
+}
+
 async function select(page: Page, id = 'source') {
   await page.bringToFront();
   // A real selection starts outside the extension's focused textarea.
@@ -80,11 +85,11 @@ async function select(page: Page, id = 'source') {
 test('install, configure, select, stream, follow up, preserve, cancel and recover', async () => {
   await expect(settings.getByRole('heading', { name: "Connect a model" })).toBeVisible();
   await expect(settings.locator('html')).toHaveAttribute('lang', 'en');
-  await settings.getByLabel('Interface language', { exact: true }).selectOption('zh-CN');
+  await choose(settings, 'Interface language', '简体中文');
   await expect(settings.getByRole('heading', { name: '连接一个模型' })).toBeVisible();
   await settings.reload();
   await expect(settings.getByRole('heading', { name: '连接一个模型' })).toBeVisible();
-  await settings.getByLabel('界面语言', { exact: true }).selectOption('en');
+  await choose(settings, '界面语言', 'English');
   await expect(settings.getByRole('heading', { name: 'Connect a model' })).toBeVisible();
   expect(await worker.evaluate(async () => ((await chrome.storage.local.get('settings')).settings as { preferences: { language: string } }).preferences.language)).toBe('简体中文');
   const manifest = await worker.evaluate(() => chrome.runtime.getManifest());
@@ -128,6 +133,10 @@ test('install, configure, select, stream, follow up, preserve, cancel and recove
   await settings.getByRole('button', { name: "Allow website", exact: true }).click();
   await expect(settings.getByText("Website access granted. Refresh that page to start selecting text.")).toBeVisible();
   reading = await context.newPage(); await reading.goto(origin);
+  await select(reading, 'second');
+  await reading.getByRole('button', { name: 'Read selected text with Selio', exact: true }).click();
+  await expect(reading.getByText('Complete', { exact: true })).toBeVisible();
+  await reading.getByRole('textbox', { name: 'Ask a follow-up' }).fill('discarded draft');
   await select(reading);
   const before = requests.length;
   await reading.getByRole('button', { name: "Read selected text with Selio", exact: true }).click();
@@ -135,6 +144,8 @@ test('install, configure, select, stream, follow up, preserve, cancel and recove
   await expect(reading.getByText('熟悉的想法也会展现新的可能。', { exact: false })).toBeVisible();
   await expect(reading.getByText("Complete", { exact: true })).toBeVisible();
   expect(requests.length).toBe(before + 1);
+  await expect(reading.getByRole('textbox', { name: 'Ask a follow-up' })).toHaveValue('');
+  await expect(reading.getByText('New selection found')).not.toBeVisible();
   expect(requests.at(-1)!.messages[1]!.content).not.toContain('A good tool');
   await reading.screenshot({ animations: 'disabled', path: 'test-results/selection-chat.png', fullPage: true });
   await reading.getByRole('textbox', { name: "Ask a follow-up" }).fill('能举一个例子吗？');
@@ -143,11 +154,6 @@ test('install, configure, select, stream, follow up, preserve, cancel and recove
   expect(requests.at(-1)!.messages.at(-1)?.content).toBe('能举一个例子吗？');
   expect(requests.at(-1)!.messages.some(m => m.role === 'assistant')).toBe(true);
   await reading.getByRole('textbox', { name: "Ask a follow-up" }).fill('保留这个草稿');
-  await select(reading, 'second');
-  await reading.getByRole('button', { name: "Read selected text with Selio", exact: true }).click();
-  await expect(reading.getByText("New selection found")).toBeVisible();
-  await reading.getByRole('button', { name: "Keep conversation", exact: true }).click();
-  await expect(reading.getByRole('textbox', { name: "Ask a follow-up" })).toHaveValue('保留这个草稿');
   await reading.getByRole('button', { name: "Close panel and keep conversation" }).click();
   await select(reading); await reading.getByRole('button', { name: "Read selected text with Selio", exact: true }).click();
   await expect(reading.getByRole('textbox', { name: "Ask a follow-up" })).toHaveValue('保留这个草稿');
@@ -163,9 +169,9 @@ test('install, configure, select, stream, follow up, preserve, cancel and recove
   await reading.getByRole('button', { name: "Regenerate", exact: true }).click();
   await expect(reading.getByText("Complete", { exact: true })).toBeVisible();
   const requestsBeforeLanguageSwitch = requests.length;
-  await settings.getByLabel('Interface language', { exact: true }).selectOption('zh-CN');
+  await choose(settings, 'Interface language', '简体中文');
   await expect(reading.getByRole('textbox', { name: '继续追问', exact: true })).toHaveValue('保留这个草稿');
-  await settings.getByLabel('界面语言', { exact: true }).selectOption('en');
+  await choose(settings, '界面语言', 'English');
   await expect(reading.getByRole('textbox', { name: 'Ask a follow-up', exact: true })).toHaveValue('保留这个草稿');
   expect(requests.length).toBe(requestsBeforeLanguageSwitch);
   const stored = await worker.evaluate(async () => ({ local: await chrome.storage.local.get(null), session: await chrome.storage.session.get(null) }));
@@ -173,6 +179,59 @@ test('install, configure, select, stream, follow up, preserve, cancel and recove
   expect(JSON.stringify(stored.session)).toContain('mock-key-for-testing');
   expect(await reading.locator('selio-assistant').evaluate(el => el.shadowRoot?.textContent)).not.toContain('mock-key-for-testing');
   expect(errors).toEqual([]);
+});
+
+test('action and scope caches preserve conversations; menus, dragging and resizing work inside Shadow DOM', async () => {
+  await reading.bringToFront();
+  const count = requests.length;
+  await reading.getByRole('button', { name: 'Summarize', exact: true }).click();
+  await expect.poll(() => requests.length).toBe(count + 1);
+  await expect(reading.getByText('Complete', { exact: true })).toBeVisible();
+  await reading.getByRole('textbox', { name: 'Ask a follow-up' }).fill('summary draft');
+  await reading.getByRole('button', { name: 'Explain', exact: true }).click();
+  await expect.poll(() => requests.length).toBe(count + 2);
+  await expect(reading.getByText('Complete', { exact: true })).toBeVisible();
+  await reading.getByRole('button', { name: 'Summarize', exact: true }).click();
+  await expect(reading.getByRole('textbox', { name: 'Ask a follow-up' })).toHaveValue('summary draft');
+  await reading.getByRole('button', { name: 'Translate', exact: true }).click();
+  await expect(reading.getByRole('textbox', { name: 'Ask a follow-up' })).toHaveValue('保留这个草稿');
+  expect(requests.length).toBe(count + 2);
+  const contextMenu = reading.getByRole('combobox', { name: 'Context', exact: true });
+  await contextMenu.click();
+  await expect(reading.getByRole('listbox')).toBeVisible();
+  await reading.screenshot({ animations: 'disabled', path: 'test-results/context-menu.png' });
+  await contextMenu.press('Escape');
+  await expect(reading.getByRole('listbox')).not.toBeVisible();
+  const panel = reading.getByRole('dialog', { name: 'Selio conversation' });
+  await expect(panel).toBeVisible();
+  await choose(reading, 'Context', 'Selection + surrounding paragraph');
+  await expect.poll(() => requests.length).toBe(count + 3);
+  await expect(reading.getByText('Complete', { exact: true })).toBeVisible();
+  await choose(reading, 'Context', 'Selected text only');
+  await expect(reading.getByRole('textbox', { name: 'Ask a follow-up' })).toHaveValue('保留这个草稿');
+  expect(requests.length).toBe(count + 3);
+  const before = (await panel.boundingBox())!;
+  const drag = reading.getByRole('button', { name: 'Move panel', exact: true });
+  const handle = (await drag.boundingBox())!;
+  await reading.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await reading.mouse.down(); await reading.mouse.move(handle.x + handle.width / 2 - 80, handle.y + handle.height / 2 - 40, { steps: 8 }); await reading.mouse.up();
+  const moved = (await panel.boundingBox())!;
+  expect(moved.x).toBeCloseTo(Math.max(12, before.x - 80), 0);
+  expect(moved.y).toBeCloseTo(Math.max(12, before.y - 40), 0);
+  const resize = (await reading.getByRole('button', { name: 'Resize panel', exact: true }).boundingBox())!;
+  await reading.mouse.move(resize.x + 10, resize.y + 10); await reading.mouse.down();
+  await reading.mouse.move(resize.x + 110, resize.y - 70, { steps: 8 }); await reading.mouse.up();
+  const resized = (await panel.boundingBox())!;
+  expect(resized.width).toBeCloseTo(moved.width + 100, 0);
+  expect(resized.height).toBeCloseTo(moved.height - 80, 0);
+  await reading.screenshot({ animations: 'disabled', path: 'test-results/resized-panel.png' });
+  await drag.focus(); await drag.press('ArrowLeft');
+  expect((await panel.boundingBox())!.x).toBeCloseTo(Math.max(12, resized.x - 10), 0);
+  await reading.setViewportSize({ width: 390, height: 700 });
+  await expect.poll(async () => (await panel.boundingBox())!.width).toBeLessThanOrEqual(366);
+  await reading.setViewportSize({ width: 1360, height: 900 });
+  await drag.dblclick();
+  expect(requests.length).toBe(count + 3);
 });
 
 test('side panel reuses the same conversation without another request', async () => {
@@ -293,14 +352,14 @@ test('privacy boundary, theme, viewport and permission revocation', async () => 
   expect(isolation).toEqual({ localBlocked: true, sessionBlocked: true, settingsDenied: true });
   await settings.bringToFront();
   await settings.getByRole('button', { name: "Reading preferences" }).click();
-  await settings.getByLabel("Appearance", { exact: true }).selectOption('dark');
+  await choose(settings, 'Appearance', 'Dark');
   await expect(settings.locator('.settings-shell')).toHaveAttribute('data-theme', 'dark');
   await settings.screenshot({ animations: 'disabled', path: 'test-results/settings-dark.png', fullPage: true });
   await settings.setViewportSize({ width: 390, height: 844 });
   expect(await settings.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await settings.screenshot({ animations: 'disabled', path: 'test-results/settings-mobile.png', fullPage: true });
   await settings.setViewportSize({ width: 1360, height: 900 });
-  await settings.getByLabel("Appearance", { exact: true }).selectOption('light');
+  await choose(settings, 'Appearance', 'Light');
   await reading.bringToFront();
   await select(reading);
   await reading.getByRole('button', { name: "Read selected text with Selio", exact: true }).click();
@@ -321,4 +380,57 @@ test('privacy boundary, theme, viewport and permission revocation', async () => 
   await expect(reading.getByRole('button', { name: "Read selected text with Selio", exact: true })).not.toBeVisible();
   expect(await worker.evaluate(() => chrome.scripting.getRegisteredContentScripts())).toEqual([]);
   expect(errors).toEqual([]);
+});
+
+
+test('token usage reports native and compatible counts, stays local and supports filters', async () => {
+  await settings.bringToFront();
+  await settings.getByRole('button', { name: 'Token usage', exact: false }).click();
+  await expect(settings.getByRole('heading', { name: 'Token usage', exact: true })).toBeVisible();
+  await expect(settings.locator('.usage-table tbody tr').first()).toBeVisible();
+  const records = await worker.evaluate(async () => (await chrome.storage.local.get('usageRecords')).usageRecords as { status: string; action: string; provider: string; usage?: { input: number; output: number; total: number } }[]);
+  expect(records.some(r => r.provider === 'custom' && r.usage?.input === 100 && r.usage.output === 20 && r.usage.total === 120)).toBe(true);
+  expect(records.some(r => r.provider === 'anthropic' && r.usage?.input === 50 && r.usage.output === 10 && r.usage.total === 60)).toBe(true);
+  expect(records.some(r => r.status === 'cancelled')).toBe(true);
+  expect(records.some(r => r.status === 'interrupted')).toBe(true);
+  expect(JSON.stringify(records)).not.toMatch(/mock-key-for-testing|Attention is|能举一个例子|保留这个草稿/);
+  await settings.screenshot({ animations: 'disabled', path: 'test-results/token-usage.png', fullPage: true });
+  await choose(settings, 'Filter by provider', 'Anthropic');
+  expect(await settings.locator('.usage-table tbody tr').count()).toBe(2);
+  await settings.setViewportSize({ width: 390, height: 844 });
+  expect(await settings.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await settings.screenshot({ animations: 'disabled', path: 'test-results/usage-mobile.png', fullPage: true });
+  await settings.setViewportSize({ width: 1360, height: 900 });
+  await choose(settings, 'Interface language', '简体中文');
+  await expect(settings.getByRole('heading', { name: 'Token 用量', exact: true })).toBeVisible();
+  await choose(settings, '界面语言', 'English');
+});
+
+test('one all-sites grant enables another host and revocation removes automatic access', async () => {
+  const manager = await context.newPage(); await manager.goto('chrome://extensions');
+  await manager.evaluate(async id => {
+    const api = (chrome as unknown as { developerPrivate: { addHostPermission: (id: string, host: string) => Promise<void> } }).developerPrivate;
+    await api.addHostPermission(id, 'https://*/*'); await api.addHostPermission(id, 'http://*/*');
+  }, extensionId);
+  await manager.close();
+  await settings.getByRole('button', { name: 'Privacy & access', exact: false }).click();
+  await settings.getByRole('checkbox', { name: 'Allow all websites' }).click();
+  await expect(settings.getByRole('checkbox', { name: 'Allow all websites' })).toBeChecked();
+  await expect.poll(async () => worker.evaluate(async () => (await chrome.scripting.getRegisteredContentScripts())[0]?.matches?.sort())).toEqual(['http://*/*', 'https://*/*']);
+  const other = await context.newPage(); await other.goto(origin.replace('127.0.0.1', 'localhost'));
+  await select(other); // This origin was never individually approved.
+  const count = requests.length;
+  await expect(other.getByRole('button', { name: 'Read selected text with Selio', exact: true })).toBeVisible();
+  expect(requests.length).toBe(count);
+  await settings.getByLabel('Domain', { exact: true }).fill('localhost');
+  await settings.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(other.getByRole('button', { name: 'Read selected text with Selio', exact: true })).not.toBeVisible();
+  await settings.getByRole('button', { name: 'Enable localhost', exact: true }).click();
+  await select(other);
+  await settings.getByRole('checkbox', { name: 'Allow all websites' }).click();
+  await expect(settings.getByRole('checkbox', { name: 'Allow all websites' })).not.toBeChecked();
+  await expect(other.getByRole('button', { name: 'Read selected text with Selio', exact: true })).not.toBeVisible();
+  expect(await worker.evaluate(() => chrome.scripting.getRegisteredContentScripts())).toEqual([]);
+  expect(errors).toEqual([]);
+  await other.close();
 });

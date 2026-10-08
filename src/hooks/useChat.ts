@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DEFAULT_PREFERENCES, type ChatCommand, type Conversation, type Preferences, type SelectionSnapshot, type ServerEvent } from '../shared/types';
+import { DEFAULT_PREFERENCES, type ChatCommand, type Conversation, type Preferences, type ServerEvent } from '../shared/types';
 
 export function useChat(tabId?: number) {
   const [conversation, setConversation] = useState<Conversation | null>(null);
@@ -7,7 +7,6 @@ export function useChat(tabId?: number) {
   const [modelName, setModelName] = useState('未配置模型');
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState('');
-  const [proposal, setProposal] = useState<SelectionSnapshot | null>(null);
   const portRef = useRef<chrome.runtime.Port | null>(null);
   const idRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -15,7 +14,7 @@ export function useChat(tabId?: number) {
     let retry: ReturnType<typeof setTimeout>;
     let heartbeat: ReturnType<typeof setInterval>;
     let watchdog: ReturnType<typeof setTimeout>;
-    setConversation(null); setProposal(null); idRef.current = undefined;
+    setConversation(null); idRef.current = undefined;
     const connect = () => {
       if (disposed) return;
       try {
@@ -32,7 +31,7 @@ export function useChat(tabId?: number) {
           port.disconnect();
           retry = setTimeout(connect, 1000);
         };
-        port.onMessage.addListener((event: ServerEvent | { type: 'proposal'; selection: SelectionSnapshot }) => {
+        port.onMessage.addListener((event: ServerEvent) => {
           if (disposed || lost || portRef.current !== port) return;
           clearTimeout(watchdog);
           if (!received) { setError(''); received = true; }
@@ -40,7 +39,6 @@ export function useChat(tabId?: number) {
           if (event.type === 'state') { idRef.current = event.conversation?.id; setConversation(event.conversation); }
           if (event.type === 'preferences') { setPreferences(event.preferences); setModelName(event.modelName); }
           if (event.type === 'error') setError(event.error);
-          if (event.type === 'proposal') setProposal(event.selection);
         });
         port.onDisconnect.addListener(reconnect);
         port.postMessage({ type: 'subscribe', tabId });
@@ -61,6 +59,6 @@ export function useChat(tabId?: number) {
     try { portRef.current?.postMessage({ ...command, conversationId: command.conversationId ?? idRef.current }); }
     catch { setError('扩展连接中断，请刷新网页重试。'); }
   }, []);
-  return { conversation, preferences, modelName, connected, error, setError, send, proposal, clearProposal: () => setProposal(null) };
+  return { conversation, preferences, modelName, connected, error, setError, send };
 }
 export type ChatSession = ReturnType<typeof useChat>;

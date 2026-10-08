@@ -12,7 +12,7 @@ function PanelChat({ tabId }: { tabId: number }) {
   const session = useChat(tabId);
   const theme = useTheme(session.preferences.theme);
   usePageLanguage(session.preferences.uiLanguage, translator(session.preferences.uiLanguage)('阅读助手'));
-  return <div className="selio-root" data-theme={theme}><Chat panel session={session} pending={session.proposal} onAccept={() => { if (session.proposal) session.send({ type: 'start', selection: session.proposal }); session.clearProposal(); }} onDismiss={session.clearProposal}/></div>;
+  return <div className="selio-root" data-theme={theme}><Chat panel session={session}/></div>;
 }
 function Panel() {
   const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES);
