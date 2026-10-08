@@ -1,11 +1,12 @@
-import { LIMITS, type Conversation, type SelectionSnapshot, type Preferences, type Action, type Scope, type ApiMessage } from '../shared/types';
+import { LIMITS, type Conversation, type SelectionSnapshot, type Preferences, type Action, type Scope, type ApiMessage, type PromptAction } from '../shared/types';
+import { builtinAction, validatePrompt } from '../shared/actions';
 import { sanitizeSnapshot, cleanText } from '../shared/validation';
 import { buildMessages } from '../llm/prompts';
 import { ApiError, errorMessage } from '../llm/errors';
 
 export interface GenerationContext { modelId: string; modelName: string; stream: (messages: ApiMessage[], signal: AbortSignal) => AsyncIterable<string> }
 interface EngineDependencies {
-  generate: (modelId: string | null, action: Action) => Promise<GenerationContext>;
+  generate: (modelId: string | null, action: Action, actionName?: string) => Promise<GenerationContext>;
   publish: (conversation: Conversation) => void;
 }
 /** One owner per tab, with request identity checked after every async boundary. */
@@ -14,6 +15,11 @@ export class ConversationEngine {
   private running = new Map<number, AbortController>();
   constructor(private dependencies: EngineDependencies) {}
   restore(state: Conversation) {
+    if (state.status === 'interrupted' && state.error === '生成已停止，已保留收到的内容。') {
+      state.status = 'stopped'; delete state.error;
+      const answer = state.messages.at(-1);
+      if (answer?.role === 'assistant') answer.stopped = true;
+    }
     if (state.status === 'generating') {
       state.status = 'interrupted';
       state.error = '后台连接已重启，已保留最近内容。点击重新生成继续。';
@@ -28,7 +34,7 @@ export class ConversationEngine {
     if (!state || state.id !== id) throw new Error('会话已切换，请在当前会话重试。');
     return state;
   }
-  start(tabId: number, snapshot: SelectionSnapshot, preferences: Preferences, modelId: string | null, expectedId?: string) {
+  start(tabId: number, snapshot: SelectionSnapshot, preferences: Preferences, modelId: string | null, expectedId?: string, template?: PromptAction) {
     const existing = this.get(tabId);
     if (existing && existing.id !== expectedId) throw new Error('当前已有对话，请确认切换选中文字。');
     this.stop(tabId);
@@ -39,12 +45,13 @@ export class ConversationEngine {
       language: preferences.language, modelId, modelName: '未配置模型', messages: [], draft: '', status: 'idle', updatedAt: Date.now(),
     };
     this.states.set(tabId, state);
-    this.begin(state);
+    this.prepare(state, template ?? builtinAction(state.action));
     return state;
   }
   ask(tabId: number, id: string | undefined, text: string) {
     const state = this.require(tabId, id);
     if (state.status === 'generating') throw new Error('请先停止当前生成。');
+    if (state.status === 'editing') throw new Error('请先执行或取消 Prompt 编辑。');
     const question = cleanText(text, LIMITS.question);
     if (!question) throw new Error('请输入问题。');
     state.messages = state.messages.slice(-(LIMITS.turns * 2 - 2));
@@ -55,11 +62,12 @@ export class ConversationEngine {
   }
   retry(tabId: number, id: string | undefined) {
     const state = this.require(tabId, id);
+    if (state.status === 'editing') throw new Error('请先执行或取消 Prompt 编辑。');
     this.stop(tabId);
     if (state.messages.at(-1)?.role === 'assistant') state.messages.pop();
     this.begin(state);
   }
-  change(tabId: number, id: string | undefined, action?: Action, scope?: Scope, paragraph?: string) {
+  change(tabId: number, id: string | undefined, action?: Action, scope?: Scope, paragraph?: string, template?: PromptAction) {
     const state = this.require(tabId, id);
     const nextAction = action ?? state.action;
     const nextScope = scope ?? state.scope;
@@ -69,20 +77,66 @@ export class ConversationEngine {
     branches[`${state.action}:${state.scope}`] = structuredClone({
       messages: state.messages, draft: state.draft, status: state.status, error: state.error,
       modelId: state.modelId, modelName: state.modelName, selection: state.selection,
+      template: state.template, prompt: state.prompt, promptDraft: state.promptDraft, editingStatus: state.editingStatus,
     });
     state.action = nextAction; state.scope = nextScope;
     const cached = branches[`${nextAction}:${nextScope}`];
-    if (cached) {
-      Object.assign(state, structuredClone(cached));
+    const definition = template ?? (nextAction === branches[`${nextAction}:${state.scope}`]?.template?.id ? branches[`${nextAction}:${state.scope}`]?.template : builtinAction(nextAction));
+    if (cached && (!definition || cached.template?.prompt === definition.prompt)) {
+      Object.assign(state, structuredClone(cached), { modelId: cached.template?.modelId ? cached.modelId : state.modelId, modelName: cached.template?.modelId ? cached.modelName : state.modelName });
       this.emit(state);
       return;
     }
     if (nextScope === 'paragraph') state.selection.paragraph = cleanText(paragraph || state.selection.paragraph || state.selection.text, LIMITS.paragraph);
     if (nextScope === 'selection') delete state.selection.paragraph;
     state.messages = []; state.draft = '';
+    this.prepare(state, definition);
+  }
+
+
+  private prepare(state: Conversation, template?: PromptAction) {
+    if (!template) throw new Error('操作模板不存在。');
+    state.template = structuredClone(template);
+    state.prompt = template.prompt; state.promptDraft = template.prompt;
+    state.modelId = template.modelId ?? state.modelId;
+    delete state.error; delete state.editingStatus;
+    if (template.execution === 'edit') { state.status = 'editing'; this.emit(state); }
+    else this.begin(state);
+  }
+  editPrompt(tabId: number, id: string | undefined) {
+    const state = this.require(tabId, id);
+    if (state.status === 'generating') throw new Error('请先停止当前生成。');
+    if (state.status === 'editing') return;
+    state.editingStatus = state.status;
+    state.promptDraft = state.prompt ?? state.template?.prompt ?? builtinAction(state.action)?.prompt ?? '';
+    state.status = 'editing'; this.emit(state);
+  }
+  promptDraft(tabId: number, id: string | undefined, text: string) {
+    const state = this.require(tabId, id);
+    if (state.status !== 'editing') return;
+    state.promptDraft = text.slice(0, 8000); this.emit(state);
+  }
+  cancelEdit(tabId: number, id: string | undefined) {
+    const state = this.require(tabId, id);
+    if (state.status !== 'editing') return;
+    state.status = state.editingStatus ?? 'idle'; delete state.editingStatus; this.emit(state);
+  }
+  execute(tabId: number, id: string | undefined, text: string) {
+    const state = this.require(tabId, id);
+    if (state.status !== 'editing') return;
+    state.prompt = validatePrompt(text); state.promptDraft = state.prompt;
+    state.messages = []; state.draft = ''; delete state.editingStatus;
     this.begin(state);
   }
 
+  model(tabId: number, id: string | undefined, modelId: string, modelName: string) {
+    const state = this.require(tabId, id);
+    if (state.status === 'generating') throw new Error('请先停止当前生成。');
+    state.modelId = modelId; state.modelName = modelName;
+    delete state.error;
+    if (state.status === 'error') state.status = 'idle';
+    this.emit(state);
+  }
   draft(tabId: number, id: string | undefined, text: string) {
     const state = this.require(tabId, id);
     state.draft = text.slice(0, LIMITS.question);
@@ -94,8 +148,10 @@ export class ConversationEngine {
     this.running.get(tabId)?.abort();
     this.running.delete(tabId);
     if (state?.status === 'generating') {
-      state.status = 'interrupted';
-      state.error = '生成已停止，已保留收到的内容。';
+      state.status = 'stopped';
+      delete state.error;
+      const answer = state.messages.at(-1);
+      if (answer?.role === 'assistant') answer.stopped = true;
       delete state.requestId;
       this.emit(state);
     }
@@ -117,7 +173,7 @@ export class ConversationEngine {
   private async run(state: Conversation, requestId: string, messages: ApiMessage[], controller: AbortController) {
     const current = () => this.get(state.tabId)?.id === state.id && state.requestId === requestId && !controller.signal.aborted;
     try {
-      const generation = await this.dependencies.generate(state.modelId, state.action);
+      const generation = await this.dependencies.generate(state.modelId, state.action, state.template?.name);
       if (!current()) return;
       state.modelId = generation.modelId;
       state.modelName = generation.modelName;

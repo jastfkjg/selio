@@ -21,9 +21,9 @@ export async function readUsage(): Promise<UsageRecord[]> {
 export const recoverUsage = () => update(records => records.map(record => record.status === 'running' ? { ...record, status: 'interrupted', finishedAt: Date.now() } : record));
 export async function clearUsage() { epoch++; await update(() => []); }
 /** Stores counters and model metadata only: no keys, source text, prompts or URLs. */
-export async function* trackedStream(config: ModelConfig, key: string, messages: ApiMessage[], signal: AbortSignal, action: Action | 'test') {
+export async function* trackedStream(config: ModelConfig, key: string, messages: ApiMessage[], signal: AbortSignal, action: Action | 'test', actionName?: string) {
   const generation = epoch;
-  const record: UsageRecord = { id: crypto.randomUUID(), startedAt: Date.now(), modelId: config.id, modelName: config.name, provider: config.provider, model: config.model, action, status: 'running' };
+  const record: UsageRecord = { id: crypto.randomUUID(), startedAt: Date.now(), modelId: config.id, modelName: config.name, provider: config.provider, model: config.model, action, actionName, status: 'running' };
   signal.throwIfAborted();
   await update(records => generation === epoch ? [...records, { ...record }] : records);
   let finished = false;

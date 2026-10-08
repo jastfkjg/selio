@@ -161,7 +161,10 @@ test('install, configure, select, stream, follow up, preserve, cancel and recove
   await reading.getByRole('button', { name: "Regenerate", exact: true }).click();
   await expect(reading.getByRole('button', { name: "Stop generating", exact: true })).toBeVisible();
   await reading.getByRole('button', { name: "Stop generating", exact: true }).click();
-  await expect(reading.getByText("Generation stopped. The content received so far has been kept.")).toBeVisible();
+  await expect(reading.getByText("Stopped generating")).toBeVisible();
+  await expect(reading.locator('.error-notice')).not.toBeVisible();
+  await expect(reading.locator('.composer').getByRole('button', { name: 'Send question' })).toBeVisible();
+  await reading.screenshot({ animations: 'disabled', path: 'test-results/stopped-inline.png' });
   slow = false; failure = true;
   await reading.getByRole('button', { name: "Regenerate", exact: true }).click();
   await expect(reading.getByText("Rate limit or quota reached. Check your quota and try again later.")).toBeVisible();
@@ -175,10 +178,36 @@ test('install, configure, select, stream, follow up, preserve, cancel and recove
   await expect(reading.getByRole('textbox', { name: 'Ask a follow-up', exact: true })).toHaveValue('保留这个草稿');
   expect(requests.length).toBe(requestsBeforeLanguageSwitch);
   const stored = await worker.evaluate(async () => ({ local: await chrome.storage.local.get(null), session: await chrome.storage.session.get(null) }));
-  expect(JSON.stringify(stored.local)).not.toContain('mock-key-for-testing');
-  expect(JSON.stringify(stored.session)).toContain('mock-key-for-testing');
+  expect(JSON.stringify(stored.local)).toContain('mock-key-for-testing');
+  expect(JSON.stringify(stored.session)).not.toContain('mock-key-for-testing');
   expect(await reading.locator('selio-assistant').evaluate(el => el.shadowRoot?.textContent)).not.toContain('mock-key-for-testing');
   expect(errors).toEqual([]);
+});
+
+test('hover waits for intent, opens the default result to the right, and reuses it on reopening', async () => {
+  const page = await context.newPage(); await page.goto(origin);
+  await page.locator('body').evaluate(el => { el.style.margin = '60px 30px'; });
+  await page.locator('article').evaluate(el => { el.style.maxWidth = '380px'; });
+  await select(page);
+  const count = requests.length;
+  const launcher = page.getByRole('button', { name: 'Read selected text with Selio', exact: true });
+  await launcher.hover(); await page.waitForTimeout(200); await page.mouse.move(10, 10);
+  await page.waitForTimeout(850);
+  expect(requests.length).toBe(count);
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await launcher.hover();
+  await expect(page.getByText('Complete', { exact: true })).toBeVisible();
+  expect(requests.length).toBe(count + 1);
+  const panel = page.getByRole('dialog', { name: 'Selio conversation' });
+  const rect = await page.locator('#source').evaluate(el => { const range = document.createRange(); range.selectNodeContents(el); return range.getBoundingClientRect().right; });
+  expect((await panel.boundingBox())!.x).toBeGreaterThan(rect);
+  await expect(page.getByRole('button', { name: 'Show context' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('.source-preview')).not.toBeVisible();
+  await page.screenshot({ path: 'test-results/hover-result.png', animations: 'disabled' });
+  await page.getByRole('button', { name: 'Close panel and keep conversation' }).click();
+  await select(page); await launcher.hover();
+  await expect(panel).toBeVisible(); expect(requests.length).toBe(count + 1);
+  await page.close();
 });
 
 test('action and scope caches preserve conversations; menus, dragging and resizing work inside Shadow DOM', async () => {
@@ -196,6 +225,9 @@ test('action and scope caches preserve conversations; menus, dragging and resizi
   await reading.getByRole('button', { name: 'Translate', exact: true }).click();
   await expect(reading.getByRole('textbox', { name: 'Ask a follow-up' })).toHaveValue('保留这个草稿');
   expect(requests.length).toBe(count + 2);
+  await expect(reading.getByRole('button', { name: 'Show context' })).toHaveAttribute('aria-expanded', 'false');
+  await expect(reading.locator('.source-preview')).not.toBeVisible();
+  await reading.getByRole('button', { name: 'Show context' }).click();
   const contextMenu = reading.getByRole('combobox', { name: 'Context', exact: true });
   await contextMenu.click();
   await expect(reading.getByRole('listbox')).toBeVisible();
@@ -319,6 +351,19 @@ test('Anthropic connects and generates through native Messages, with responsive 
   await expect(nativePage.getByText('Complete', { exact: true })).toBeVisible();
   expect(nativeRequests.at(-1)?.system).toBeTruthy();
   expect(nativeRequests.at(-1)?.messages.every(m => m.role !== 'system')).toBe(true);
+  const switchCount = requests.length;
+  await nativePage.getByRole('textbox', { name: 'Ask a follow-up' }).fill('Switch model and keep history');
+  await choose(nativePage, 'Switch model', 'Local mock');
+  expect(requests.length).toBe(switchCount);
+  await expect(nativePage.getByText('Native Anthropic response.', { exact: true })).toBeVisible();
+  await expect(nativePage.getByRole('textbox', { name: 'Ask a follow-up' })).toHaveValue('Switch model and keep history');
+  await expect(nativePage.getByText('Enter to send · Shift + Enter for a new line')).not.toBeVisible();
+  await nativePage.getByRole('textbox', { name: 'Ask a follow-up' }).press('Enter');
+  await expect(nativePage.getByText('Complete', { exact: true })).toBeVisible();
+  expect(requests.length).toBe(switchCount + 1);
+  expect(requests.at(-1)?.messages.some(m => m.role === 'assistant' && m.content === 'Native Anthropic response.')).toBe(true);
+  await nativePage.getByRole('combobox', { name: 'Switch model' }).click();
+  await nativePage.screenshot({ animations: 'disabled', path: 'test-results/model-switcher.png' });
   await nativePage.close();
   await settings.locator('.model-row').filter({ hasText: 'Local mock' }).getByRole('button', { name: 'Set as default' }).click();
   await settings.getByRole('button', { name: 'Edit Claude mock', exact: true }).click();
@@ -422,6 +467,18 @@ test('one all-sites grant enables another host and revocation removes automatic 
   const count = requests.length;
   await expect(other.getByRole('button', { name: 'Read selected text with Selio', exact: true })).toBeVisible();
   expect(requests.length).toBe(count);
+  const popup = await context.newPage(); await other.bringToFront();
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+  const siteToggle = popup.getByRole('checkbox', { name: 'Use Selio on this website' });
+  await expect(siteToggle).toBeChecked();
+  await siteToggle.click();
+  await expect(siteToggle).not.toBeChecked();
+  await expect(other.getByRole('button', { name: 'Read selected text with Selio', exact: true })).not.toBeVisible();
+  await other.bringToFront(); await popup.reload();
+  await expect(siteToggle).not.toBeChecked();
+  await popup.screenshot({ path: 'test-results/website-toggle.png', animations: 'disabled' });
+  await siteToggle.click(); await expect(siteToggle).toBeChecked();
+  await popup.close(); await select(other);
   await settings.getByLabel('Domain', { exact: true }).fill('localhost');
   await settings.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(other.getByRole('button', { name: 'Read selected text with Selio', exact: true })).not.toBeVisible();
@@ -433,4 +490,22 @@ test('one all-sites grant enables another host and revocation removes automatic 
   expect(await worker.evaluate(() => chrome.scripting.getRegisteredContentScripts())).toEqual([]);
   expect(errors).toEqual([]);
   await other.close();
+});
+
+test('saved API keys survive a complete browser restart', async () => {
+  await context.close();
+  const extension = path.resolve('.output/chrome-mv3');
+  context = await chromium.launchPersistentContext(profile, {
+    channel: 'chromium', headless: true,
+    ...(process.env.SELIO_CHROMIUM_PATH ? { executablePath: process.env.SELIO_CHROMIUM_PATH } : {}),
+    args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+    viewport: { width: 1360, height: 900 },
+  });
+  worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+  settings = await context.newPage(); await settings.goto(`chrome-extension://${extensionId}/options.html`);
+  await expect(settings.getByText('Key saved on device', { exact: false })).toHaveCount(2);
+  const stored = await worker.evaluate(async () => ({ local: await chrome.storage.local.get(null), session: await chrome.storage.session.get(null) }));
+  expect(JSON.stringify(stored.local)).toContain('mock-key-for-testing');
+  expect(JSON.stringify(stored.local)).toContain('mock-anthropic-key');
+  expect(JSON.stringify(stored.session)).not.toContain('mock-key-for-testing');
 });

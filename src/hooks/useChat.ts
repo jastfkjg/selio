@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DEFAULT_PREFERENCES, type ChatCommand, type Conversation, type Preferences, type ServerEvent } from '../shared/types';
+import { DEFAULT_ACTIONS } from '../shared/actions';
+import { DEFAULT_PREFERENCES, type ChatCommand, type Conversation, type Preferences, type PublicModel, type PromptAction, type ServerEvent } from '../shared/types';
 
 export function useChat(tabId?: number) {
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES);
+  const [actions, setActions] = useState<PromptAction[]>(DEFAULT_ACTIONS);
+  const [models, setModels] = useState<PublicModel[]>([]);
   const [modelName, setModelName] = useState('未配置模型');
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState('');
@@ -37,7 +40,7 @@ export function useChat(tabId?: number) {
           if (!received) { setError(''); received = true; }
           setConnected(true);
           if (event.type === 'state') { idRef.current = event.conversation?.id; setConversation(event.conversation); }
-          if (event.type === 'preferences') { setPreferences(event.preferences); setModelName(event.modelName); }
+          if (event.type === 'preferences') { setPreferences(event.preferences); setModelName(event.modelName); setModels(event.models); setActions(event.actions); }
           if (event.type === 'error') setError(event.error);
         });
         port.onDisconnect.addListener(reconnect);
@@ -59,6 +62,6 @@ export function useChat(tabId?: number) {
     try { portRef.current?.postMessage({ ...command, conversationId: command.conversationId ?? idRef.current }); }
     catch { setError('扩展连接中断，请刷新网页重试。'); }
   }, []);
-  return { conversation, preferences, modelName, connected, error, setError, send };
+  return { conversation, preferences, modelName, models, actions, connected, error, setError, send };
 }
 export type ChatSession = ReturnType<typeof useChat>;

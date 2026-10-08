@@ -3,7 +3,7 @@ import type { ModelConfig } from '../src/shared/types';
 const config: ModelConfig = { id: 'model', name: 'Model', provider: 'custom', baseUrl: 'https://example.com/v1', model: 'model', keyStorage: 'session', maxTokens: 2048 };
 function area() {
   const data: Record<string, unknown> = {};
-  return { data, get: vi.fn(async (key: string) => ({ [key]: data[key] })), set: vi.fn(async (values: Record<string, unknown>) => { Object.assign(data, structuredClone(values)); }), remove: vi.fn(async (key: string) => { delete data[key]; }), setAccessLevel: vi.fn(async () => undefined) };
+  return { data, get: vi.fn(async (key: string) => structuredClone({ [key]: data[key] })), set: vi.fn(async (values: Record<string, unknown>) => { Object.assign(data, structuredClone(values)); }), remove: vi.fn(async (key: string) => { delete data[key]; }), setAccessLevel: vi.fn(async () => undefined) };
 }
 let local: ReturnType<typeof area>;
 let session: ReturnType<typeof area>;
@@ -47,8 +47,32 @@ it('migrates existing preferences to English without losing models, keys or answ
   session.data['key:model'] = 'SECRET';
   const view = await repo.settingsView();
   expect(view.preferences).toMatchObject({ uiLanguage: 'en', language: '日本語', theme: 'dark', autoSelection: false });
-  expect(view.models[0]).toEqual({ ...config, hasKey: true });
+  expect(view.models[0]).toEqual({ ...config, keyStorage: 'local', hasKey: true });
   await repo.savePreferences({ ...view.preferences, uiLanguage: 'zh-CN' });
   expect((await repo.settingsView()).preferences).toMatchObject({ uiLanguage: 'zh-CN', language: '日本語' });
-  expect(await repo.readKey(config)).toBe('SECRET');
+  expect(await repo.readKey(view.models[0]!)).toBe('SECRET');
+});
+
+it('migrates legacy session keys once and keeps them after a restart', async () => {
+  local.data.settings = { preferences: {}, models: [{ ...config }], defaultModelId: config.id };
+  session.data['key:model'] = 'LEGACY';
+  let repo = await import('../src/background/repository');
+  let view = await repo.settingsView();
+  expect(view.models[0]).toMatchObject({ keyStorage: 'local', hasKey: true });
+  expect(session.data['key:model']).toBeUndefined();
+  expect(local.data['key:model']).toBe('LEGACY');
+  session = area(); vi.stubGlobal('chrome', { storage: { local, session } }); vi.resetModules();
+  repo = await import('../src/background/repository'); view = await repo.settingsView();
+  expect(view.models[0]?.hasKey).toBe(true);
+  // An explicit session-only choice after upgrading remains session-only.
+  await repo.saveModel({ ...config, keyStorage: 'session' });
+  vi.resetModules(); repo = await import('../src/background/repository');
+  expect((await repo.settingsView()).models[0]?.keyStorage).toBe('session');
+  expect(local.data['key:model']).toBeUndefined();
+});
+it('updates expired legacy key settings without inventing a missing secret', async () => {
+  local.data.settings = { preferences: {}, models: [{ ...config }], defaultModelId: config.id };
+  const repo = await import('../src/background/repository');
+  expect((await repo.settingsView()).models[0]).toMatchObject({ keyStorage: 'local', hasKey: false });
+  expect(local.data['key:model']).toBeUndefined();
 });

@@ -3,6 +3,13 @@ import type { UILanguage } from './types';
 // Chinese source messages also identify existing, persisted background errors.
 // Only application copy is translated; selected text, answers and user names are untouched.
 export const english: Record<string, string> = {
+"已停止生成": "Stopped generating",
+"展开上下文": "Show context",
+"切换模型": "Switch model",
+"仅本次浏览器会话": "This browser session only",
+"请输入 API Key。默认保存在这台设备上。": "Enter your API key. It is saved on this device by default.",
+"未找到 API Key，请在设置中重新输入并保存。": "API key not found. Enter and save it again in settings.",
+"点击图标或悬停片刻后，立即执行的动作。": "Runs when you click the selection icon or hover over it briefly.",
 "允许全部网站": "Allow all websites",
 "一次授权，在所有普通网页显示划词图标。禁用列表仍然生效。": "Allow once to show Selio on all regular webpages. Disabled websites stay excluded.",
 "已允许全部网站。其他已打开的网页刷新后生效。": "All websites allowed. Refresh other open pages to enable Selio.",

@@ -33,7 +33,8 @@ describe('conversation lifecycle', () => {
     let call = 0;
     const { engine } = setup(async function* () { if (++call === 1) { yield 'old'; await new Promise<void>(resolve => { unblock = resolve; }); yield 'STALE'; } else yield 'new'; });
     const a = engine.start(1, selection, DEFAULT_PREFERENCES, null); await tick();
-    engine.stop(1, a.id); expect(a.status).toBe('interrupted');
+    engine.stop(1, a.id); expect(a.status).toBe('stopped');
+    expect(a.error).toBeUndefined(); expect(a.messages[0]?.stopped).toBe(true);
     const b = engine.start(1, selection, DEFAULT_PREFERENCES, null, a.id); await tick(); unblock(); await tick();
     expect(b.messages[0]?.content).toBe('new'); expect(a.messages[0]?.content).toBe('old');
   });
@@ -104,5 +105,31 @@ it('never mixes late tokens into a different action or silently retries an inter
   engine.change(1, state.id, 'summarize'); await tick(); release(); await tick();
   expect(state.messages[0]?.content).toBe('summary');
   engine.change(1, state.id, 'translate'); await tick();
-  expect(state.messages[0]?.content).toBe('partial'); expect(state.status).toBe('interrupted'); expect(calls).toBe(2);
+  expect(state.messages[0]?.content).toBe('partial'); expect(state.status).toBe('stopped'); expect(calls).toBe(2);
+});
+
+it('switches models without a request or history loss, retaining the choice across cached actions', async () => {
+  const calls: { modelId: string | null; messages: ApiMessage[] }[] = [];
+  const engine = new ConversationEngine({ publish: () => {}, generate: async modelId => ({ modelId: modelId!, modelName: modelId!, stream: async function* (messages) { calls.push({ modelId, messages }); yield 'answer'; } }) });
+  const state = engine.start(1, selection, DEFAULT_PREFERENCES, 'first'); await tick();
+  engine.change(1, state.id, 'summarize'); await tick();
+  engine.draft(1, state.id, 'kept draft');
+  const history = structuredClone(state.messages);
+  engine.model(1, state.id, 'second', 'Second');
+  expect(calls).toHaveLength(2); expect(state.messages).toEqual(history); expect(state.draft).toBe('kept draft');
+  engine.change(1, state.id, 'translate');
+  expect(state.modelId).toBe('second'); expect(calls).toHaveLength(2);
+  engine.ask(1, state.id, 'follow up'); await tick();
+  expect(calls.at(-1)?.modelId).toBe('second');
+  expect(calls.at(-1)?.messages.map(m => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+  expect(() => engine.model(1, 'stale', 'first', 'First')).toThrow('会话已切换');
+});
+
+it('restores legacy manual stops as a neutral inline state', async () => {
+  const { engine } = setup(async function* () { yield 'partial'; });
+  const state = engine.start(1, selection, DEFAULT_PREFERENCES, null); await tick();
+  state.status = 'interrupted'; state.error = '生成已停止，已保留收到的内容。';
+  engine.restore(state);
+  expect(state.status).toBe('stopped'); expect(state.error).toBeUndefined();
+  expect(state.messages[0]).toMatchObject({ content: 'partial', stopped: true });
 });

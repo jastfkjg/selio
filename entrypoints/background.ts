@@ -1,6 +1,6 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { ConversationEngine } from '../src/background/conversations';
-import { deleteModel, mutateSettings, protectStorage, readKey, readSaved, saveModel, savePreferences, setDefault, settingsView } from '../src/background/repository';
+import { deleteAction, saveAction, deleteModel, mutateSettings, protectStorage, readKey, readSaved, saveModel, savePreferences, setDefault, settingsView } from '../src/background/repository';
 import { translator } from '../src/shared/i18n';
 import { clearUsage, readUsage, recoverUsage, trackedStream } from '../src/background/usage';
 import { ApiError, errorMessage } from '../src/llm/errors';
@@ -30,14 +30,14 @@ export default defineBackground(() => {
     try { port.postMessage(event); } catch { ports.delete(port); }
   }
   const engine = new ConversationEngine({
-    async generate(modelId, action) {
+    async generate(modelId, action, actionName) {
       const saved = await readSaved();
       const model = saved.models.find(m => m.id === modelId) ?? saved.models.find(m => m.id === saved.defaultModelId);
       if (!model) throw new ApiError('configuration', '先添加一个模型，即可开始阅读。请打开设置配置 API。');
       const key = await readKey(model);
-      if (!key) throw new ApiError('key_missing', '会话密钥已过期，请在设置中重新输入 API Key。');
+      if (!key) throw new ApiError('key_missing', model.keyStorage === 'session' ? '会话密钥已过期，请在设置中重新输入 API Key。' : '未找到 API Key，请在设置中重新输入并保存。');
       if (!await chrome.permissions.contains({ origins: [originPattern(model.baseUrl)] })) throw new ApiError('permission', '尚未授权模型 API 来源，请在设置中编辑并保存模型以授权。');
-      return { modelId: model.id, modelName: model.name, stream: (messages, signal) => trackedStream(model, key, messages, signal, action) };
+      return { modelId: model.id, modelName: model.name, stream: (messages, signal) => trackedStream(model, key, messages, signal, action, actionName) };
     },
     publish(state) {
       persist(state);
@@ -81,7 +81,7 @@ export default defineBackground(() => {
       const saved = await readSaved();
       void chrome.action.setTitle({ title: `Selio · ${translator(saved.preferences.uiLanguage)('阅读助手')}` });
       void chrome.contextMenus.update('selio-read', { title: translator(saved.preferences.uiLanguage)('用 Selio 理解选中文字') }).catch(() => undefined);
-      for (const port of ports.keys()) post(port, { type: 'preferences', preferences: saved.preferences, modelName: saved.models.find(m => m.id === saved.defaultModelId)?.name ?? '未配置模型' });
+      for (const port of ports.keys()) post(port, { type: 'preferences', preferences: saved.preferences, modelName: saved.models.find(m => m.id === saved.defaultModelId)?.name ?? '未配置模型', models: saved.models.map(({ id, name, provider, model }) => ({ id, name, provider, model })), actions: saved.actions });
       const tabs = await chrome.tabs.query({});
       for (const tab of tabs) {
         if (tab.id === undefined) continue;
@@ -115,7 +115,7 @@ export default defineBackground(() => {
     const selection: SelectionSnapshot = { text: info.selectionText.slice(0, 12000), rect: { x: 20, y: 20, width: 0, height: 0 }, pageTitle: tab.title ?? '' };
     void ready.then(async () => {
       const settings = await readSaved();
-      engine.start(tabId, selection, { ...settings.preferences, scope: 'selection' }, settings.defaultModelId, engine.get(tabId)?.id);
+      engine.start(tabId, selection, { ...settings.preferences, scope: 'selection' }, settings.defaultModelId, engine.get(tabId)?.id, settings.actions.find(a => a.id === settings.preferences.action));
     });
   });
 
@@ -135,7 +135,7 @@ export default defineBackground(() => {
           await chrome.tabs.get(tabId);
           post(port, { type: 'state', conversation: engine.get(tabId) });
           const saved = await readSaved();
-          post(port, { type: 'preferences', preferences: saved.preferences, modelName: saved.models.find(m => m.id === saved.defaultModelId)?.name ?? '未配置模型' });
+          post(port, { type: 'preferences', preferences: saved.preferences, modelName: saved.models.find(m => m.id === saved.defaultModelId)?.name ?? '未配置模型', models: saved.models.map(({ id, name, provider, model }) => ({ id, name, provider, model })), actions: saved.actions });
         }).catch(() => post(port, { type: 'error', error: '该标签页已关闭。' }));
         return;
       }
@@ -148,14 +148,32 @@ export default defineBackground(() => {
           case 'start': {
             if (!command.selection) throw new Error('请先选中文字。');
             const saved = await readSaved();
-            engine.start(tabId, command.selection, saved.preferences, saved.defaultModelId, command.conversationId);
+            engine.start(tabId, command.selection, saved.preferences, saved.defaultModelId, command.conversationId, saved.actions.find(a => a.id === saved.preferences.action));
+            break;
+          }
+          case 'model': {
+            const saved = await readSaved();
+            const model = saved.models.find(m => m.id === command.modelId);
+            if (!model) throw new Error('模型配置不存在。');
+            engine.model(tabId, command.conversationId, model.id, model.name);
             break;
           }
           case 'ask': if (typeof command.text === 'string') engine.ask(tabId, command.conversationId, command.text); break;
           case 'retry': engine.retry(tabId, command.conversationId); break;
           case 'stop': engine.stop(tabId, command.conversationId); break;
           case 'draft': if (typeof command.text === 'string') engine.draft(tabId, command.conversationId, command.text); break;
-          case 'action': if (isAction(command.action)) engine.change(tabId, command.conversationId, command.action); break;
+          case 'execute': if (typeof command.text === 'string') engine.execute(tabId, command.conversationId, command.text); break;
+          case 'edit-prompt': engine.editPrompt(tabId, command.conversationId); break;
+          case 'prompt-draft': if (typeof command.text === 'string') engine.promptDraft(tabId, command.conversationId, command.text); break;
+          case 'cancel-edit': engine.cancelEdit(tabId, command.conversationId); break;
+          case 'action': {
+            if (!isAction(command.action)) throw new Error('操作模板无效。');
+            const saved = await readSaved();
+            const template = saved.actions.find(a => a.id === command.action);
+            if (!template) throw new Error('操作模板不存在。');
+            engine.change(tabId, command.conversationId, command.action, undefined, undefined, template);
+            break;
+          }
           case 'scope': {
             if (command.scope !== 'selection' && command.scope !== 'paragraph') break;
             let paragraph: string | undefined;
@@ -165,7 +183,7 @@ export default defineBackground(() => {
               if (typeof result?.paragraph !== 'string') throw new Error('此选区的段落已不可用，请返回网页重新选择，或保持仅选中文字。');
               paragraph = result.paragraph;
             }
-            engine.change(tabId, command.conversationId, undefined, command.scope, paragraph);
+            engine.change(tabId, command.conversationId, undefined, command.scope, paragraph, engine.get(tabId)?.template);
           }
         }
       }).catch(error => post(port, { type: 'error', error: error instanceof Error ? error.message : '操作未完成，请重试。' }));
@@ -191,6 +209,8 @@ export default defineBackground(() => {
         case 'usage:get': return readUsage();
         case 'usage:clear': await clearUsage(); return [];
         case 'settings:get': return settingsView();
+        case 'actions:save': await saveAction(p); break;
+        case 'actions:delete': if (!isAction(p)) throw new Error('操作模板无效。'); await deleteAction(p); break;
         case 'settings:model': await saveModel(p?.model, p?.key); break;
         case 'settings:delete': if (typeof p !== 'string') throw new Error('模型无效。'); await deleteModel(p); break;
         case 'settings:default': if (typeof p !== 'string') throw new Error('模型无效。'); await setDefault(p); break;
@@ -218,6 +238,18 @@ export default defineBackground(() => {
           if (p && !await chrome.permissions.contains({ origins: ALL_SITES })) throw new Error('网站权限尚未授予。');
           await mutateSettings(async saved => { saved.preferences.allSites = p; });
           if (!p) await chrome.permissions.remove({ origins: ALL_SITES });
+          break;
+        }
+        case 'site:toggle': {
+          if (typeof p?.url !== 'string' || typeof p?.enabled !== 'boolean') throw new Error('网站地址无效。');
+          const url = new URL(p.url);
+          if (!['https:', 'http:'].includes(url.protocol)) throw new Error('仅支持普通 HTTP/HTTPS 网站。');
+          await mutateSettings(async saved => {
+            const sites = saved.preferences.disabledSites;
+            saved.preferences.disabledSites = p.enabled
+              ? sites.filter(site => url.hostname !== site && !url.hostname.endsWith(`.${site}`))
+              : [...new Set([...sites, url.hostname])].slice(-200);
+          });
           break;
         }
         case 'site:add': {
@@ -251,6 +283,7 @@ export default defineBackground(() => {
           await Promise.all(writeQueues.values());
           await clearUsage();
           await chrome.storage.local.clear(); await chrome.storage.session.clear();
+          await chrome.storage.local.set({ keyStorageVersion: 2 });
           const permissions = await chrome.permissions.getAll();
           if (permissions.origins?.length) await chrome.permissions.remove({ origins: permissions.origins });
           for (const port of ports.keys()) post(port, { type: 'state', conversation: null });

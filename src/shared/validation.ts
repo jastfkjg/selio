@@ -1,7 +1,8 @@
-import { DEFAULT_PREFERENCES, LIMITS, type Action, type ModelConfig, type Preferences, type SelectionSnapshot } from './types';
+import { DEFAULT_PREFERENCES, LIMITS, type ModelConfig, type Preferences, type SelectionSnapshot } from './types';
+import { isActionId } from './actions';
 import { PROVIDER_IDS } from './providers';
 
-export const isAction = (v: unknown): v is Action => v === 'translate' || v === 'summarize' || v === 'explain';
+export const isAction = isActionId;
 export function apiEndpoint(baseUrl: string, provider: ModelConfig['provider'] = 'custom'): string {
   let url: URL;
   try { url = new URL(baseUrl.trim()); } catch { throw new Error('请输入完整的 API Base URL。'); }

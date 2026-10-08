@@ -148,3 +148,22 @@ h1, h2, h3, p { margin: 0; } h1, h2, h3 { font-weight: 600; }
 @media (max-width: 600px) { .usage-totals { grid-template-columns: repeat(2, 1fr); }.usage-bars { gap: 5px; }.usage-chart { padding: 16px 10px; }.settings-nav { flex-wrap: wrap; } }
 .settings-main, .usage-page { min-width: 0; }
 .usage-table-scroll { max-width: 100%; }
+
+/* Compact reading controls leave the answer as the primary surface. */
+.context-disclosure { display: flex; justify-content: space-between; align-items: center; margin: 0 16px; padding: 7px 0 10px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.context-disclosure:hover { color: var(--accent); }
+.context-count { opacity: .75; }
+.context-details { flex-shrink: 0; padding-top: 10px; }
+.generation-stopped { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--muted); margin-top: 10px; }
+.composer-model { min-width: 0; max-width: calc(100% - 38px); }
+.composer-model > span { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 11px; }
+.composer-model .select-trigger { min-height: 28px; padding: 3px 5px; border-color: transparent; background: transparent; font-size: 11px; }
+.model-option { display: flex; flex-direction: column; gap: 3px; }
+.model-option strong { font-weight: 500; }
+.model-option small { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.stop-button { border-radius: 50%; }
+.popup-site-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 7px; margin: 8px 0; font-size: 12px; }
+
+.composer-model .select-trigger { max-width: 100%; }
+.composer-model .model-option small { display: none; }
+.composer-model .model-option strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
