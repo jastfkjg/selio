@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DEFAULT_ACTIONS } from '../shared/actions';
-import { DEFAULT_PREFERENCES, type ChatCommand, type Conversation, type Preferences, type PublicModel, type PromptAction, type ServerEvent } from '../shared/types';
+import { DEFAULT_PREFERENCES, type ChatCommand, type Conversation, type Preferences, type PublicModel, type PublicAction, type ServerEvent } from '../shared/types';
 
 export function useChat(tabId?: number) {
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES);
-  const [actions, setActions] = useState<PromptAction[]>(DEFAULT_ACTIONS);
+  const [actions, setActions] = useState<PublicAction[]>(DEFAULT_ACTIONS);
   const [models, setModels] = useState<PublicModel[]>([]);
   const [modelName, setModelName] = useState('未配置模型');
   const [connected, setConnected] = useState(false);

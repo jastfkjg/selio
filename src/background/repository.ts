@@ -37,7 +37,7 @@ export async function readSaved(): Promise<Saved> {
   await (migration ??= migrateKeyStorage());
   const { settings } = await chrome.storage.local.get('settings');
   const saved = (settings as Saved | undefined) ?? { models: [], defaultModelId: null };
-  return { ...saved, actions: saved.actions ?? structuredClone(DEFAULT_ACTIONS), preferences: { ...DEFAULT_PREFERENCES, ...('preferences' in saved ? saved.preferences : {}) } };
+  return { ...saved, actions: ('actions' in saved ? saved.actions : undefined) ?? structuredClone(DEFAULT_ACTIONS), preferences: { ...DEFAULT_PREFERENCES, ...('preferences' in saved ? saved.preferences : {}) } };
 }
 export async function readKey(model: ModelConfig): Promise<string> {
   await protectStorage();

@@ -133,3 +133,44 @@ it('restores legacy manual stops as a neutral inline state', async () => {
   expect(state.status).toBe('stopped'); expect(state.error).toBeUndefined();
   expect(state.messages[0]).toMatchObject({ content: 'partial', stopped: true });
 });
+
+it('waits for explicit execution, shares editor drafts, and preserves per-run prompts in cached branches', async () => {
+  const calls: { modelId: string | null; messages: ApiMessage[] }[] = [];
+  const template = { id: 'custom:tech' as const, name: 'Technical', icon: 'Code' as const, prompt: 'Explain {{selection}}', modelId: 'special', execution: 'edit' as const, showInQuickActions: true };
+  const engine = new ConversationEngine({ publish: () => {}, generate: async modelId => ({ modelId: modelId!, modelName: modelId!, stream: async function* (messages) { calls.push({ modelId, messages }); yield 'custom answer'; } }) });
+  const state = engine.start(1, selection, { ...DEFAULT_PREFERENCES, action: template.id }, 'default', undefined, template); await tick();
+  expect(state.status).toBe('editing'); expect(calls).toHaveLength(0); expect(state.modelId).toBe('special');
+  engine.promptDraft(1, state.id, 'Review {{selection}}');
+  const recovered = new ConversationEngine({ publish: () => {}, generate: async () => { throw new Error('must not run'); } });
+  recovered.restore(structuredClone(state)); expect(recovered.get(1)?.promptDraft).toBe('Review {{selection}}'); expect(recovered.get(1)?.status).toBe('editing');
+  engine.cancelEdit(1, state.id); await tick(); expect(calls).toHaveLength(0);
+  engine.editPrompt(1, state.id); engine.execute(1, state.id, 'Give a code example: {{selection}}'); await tick();
+  expect(calls).toHaveLength(1); expect(calls[0]?.modelId).toBe('special'); expect(calls[0]?.messages[0]?.content).toContain('Give a code example');
+  expect(template.prompt).toBe('Explain {{selection}}');
+  engine.execute(1, state.id, 'duplicate {{selection}}'); await tick(); expect(calls).toHaveLength(1);
+  engine.change(1, state.id, 'translate'); await tick();
+  engine.change(1, state.id, template.id, undefined, undefined, template); await tick();
+  expect(calls).toHaveLength(2); expect(state.prompt).toBe('Give a code example: {{selection}}'); expect(state.modelId).toBe('special');
+  engine.editPrompt(1, state.id); engine.cancelEdit(1, state.id); expect(state.messages[0]?.content).toBe('custom answer');
+});
+it('uses a template model immediately and rebuilds a branch only when the saved prompt changes', async () => {
+  let calls = 0;
+  const template = { id: 'custom:tech' as const, name: 'Technical', icon: 'Code' as const, prompt: 'Explain {{selection}}', modelId: 'special', execution: 'direct' as const, showInQuickActions: true };
+  const engine = new ConversationEngine({ publish: () => {}, generate: async modelId => ({ modelId: modelId!, modelName: modelId!, stream: async function* () { calls++; yield 'answer'; } }) });
+  const state = engine.start(1, selection, DEFAULT_PREFERENCES, 'default'); await tick();
+  engine.change(1, state.id, template.id, undefined, undefined, template); await tick(); expect(state.modelId).toBe('special');
+  engine.change(1, state.id, 'translate'); await tick();
+  engine.change(1, state.id, template.id, undefined, undefined, { ...template, prompt: 'Check logic: {{selection}}' }); await tick();
+  expect(calls).toBe(3); expect(state.prompt).toBe('Check logic: {{selection}}');
+});
+
+it('changing scope while editing never runs the prompt or resets the selected model', async () => {
+  let calls = 0;
+  const engine = new ConversationEngine({ publish: () => {}, generate: async modelId => ({ modelId: modelId!, modelName: modelId!, stream: async function* () { calls++; yield 'answer'; } }) });
+  const state = engine.start(1, selection, DEFAULT_PREFERENCES, 'default'); await tick();
+  engine.editPrompt(1, state.id); engine.promptDraft(1, state.id, 'Edited {{selection}}');
+  engine.model(1, state.id, 'other', 'Other');
+  engine.change(1, state.id, undefined, 'paragraph', 'surrounding paragraph'); await tick();
+  expect(calls).toBe(1); expect(state.status).toBe('editing'); expect(state.promptDraft).toBe('Edited {{selection}}'); expect(state.modelId).toBe('other');
+  engine.execute(1, state.id, state.promptDraft!); await tick(); expect(calls).toBe(2);
+});

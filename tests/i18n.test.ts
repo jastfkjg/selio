@@ -12,7 +12,7 @@ describe('interface languages', () => {
     expect(translator()('用户定义的模型名称')).toBe('用户定义的模型名称');
   });
   it('covers every localized UI string and known background error', () => {
-    const files = ['src/components/UsagePage.tsx', 'entrypoints/options/main.tsx', 'entrypoints/popup/main.tsx', 'entrypoints/content/index.tsx', 'entrypoints/sidepanel/main.tsx', 'src/components/Chat.tsx', 'src/llm/errors.ts', 'src/llm/adapter.ts', 'src/llm/sse.ts', 'src/shared/validation.ts', 'src/shared/rpc.ts', 'src/background/repository.ts', 'src/background/conversations.ts', 'entrypoints/background.ts', 'src/hooks/useChat.ts'];
+    const files = ['src/components/ActionsPage.tsx', 'src/components/PromptEditor.tsx', 'src/shared/actions.ts', 'src/llm/prompts.ts', 'src/components/UsagePage.tsx', 'entrypoints/options/main.tsx', 'entrypoints/popup/main.tsx', 'entrypoints/content/index.tsx', 'entrypoints/sidepanel/main.tsx', 'src/components/Chat.tsx', 'src/llm/errors.ts', 'src/llm/adapter.ts', 'src/llm/sse.ts', 'src/shared/validation.ts', 'src/shared/rpc.ts', 'src/background/repository.ts', 'src/background/conversations.ts', 'entrypoints/background.ts', 'src/hooks/useChat.ts'];
     const missing = new Set<string>();
     for (const path of files) {
       const file = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);

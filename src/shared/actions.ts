@@ -9,7 +9,7 @@ export const DEFAULT_ACTIONS: PromptAction[] = [
 ];
 export const isActionId = (value: unknown): value is Action => typeof value === 'string' && (DEFAULT_ACTIONS.some(a => a.id === value) || /^custom:[\w-]{1,80}$/.test(value));
 export const builtinAction = (id: Action) => DEFAULT_ACTIONS.find(a => a.id === id);
-export function actionLabel(action: PromptAction, t: Translator): string {
+export function actionLabel(action: Pick<PromptAction, 'id' | 'name'>, t: Translator): string {
   return builtinAction(action.id)?.name === action.name ? t(action.name) : action.name;
 }
 export function validatePrompt(prompt: unknown): string {

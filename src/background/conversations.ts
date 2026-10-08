@@ -70,6 +70,9 @@ export class ConversationEngine {
   change(tabId: number, id: string | undefined, action?: Action, scope?: Scope, paragraph?: string, template?: PromptAction) {
     const state = this.require(tabId, id);
     const nextAction = action ?? state.action;
+    const sameAction = nextAction === state.action;
+    const wasEditing = state.status === 'editing';
+    const currentPrompt = wasEditing ? state.promptDraft : state.prompt;
     const nextScope = scope ?? state.scope;
     if (nextAction === state.action && nextScope === state.scope) return;
     this.stop(tabId);
@@ -81,8 +84,8 @@ export class ConversationEngine {
     });
     state.action = nextAction; state.scope = nextScope;
     const cached = branches[`${nextAction}:${nextScope}`];
-    const definition = template ?? (nextAction === branches[`${nextAction}:${state.scope}`]?.template?.id ? branches[`${nextAction}:${state.scope}`]?.template : builtinAction(nextAction));
-    if (cached && (!definition || cached.template?.prompt === definition.prompt)) {
+    const definition = template ?? (state.template?.id === nextAction ? state.template : builtinAction(nextAction));
+    if (cached && (!definition || (cached.template?.prompt ?? builtinAction(nextAction)?.prompt) === definition.prompt)) {
       Object.assign(state, structuredClone(cached), { modelId: cached.template?.modelId ? cached.modelId : state.modelId, modelName: cached.template?.modelId ? cached.modelName : state.modelName });
       this.emit(state);
       return;
@@ -90,17 +93,17 @@ export class ConversationEngine {
     if (nextScope === 'paragraph') state.selection.paragraph = cleanText(paragraph || state.selection.paragraph || state.selection.text, LIMITS.paragraph);
     if (nextScope === 'selection') delete state.selection.paragraph;
     state.messages = []; state.draft = '';
-    this.prepare(state, definition);
+    this.prepare(state, definition, sameAction ? currentPrompt : undefined, sameAction, sameAction && wasEditing);
   }
 
 
-  private prepare(state: Conversation, template?: PromptAction) {
+  private prepare(state: Conversation, template?: PromptAction, prompt?: string, preserveModel = false, defer = false) {
     if (!template) throw new Error('操作模板不存在。');
     state.template = structuredClone(template);
-    state.prompt = template.prompt; state.promptDraft = template.prompt;
-    state.modelId = template.modelId ?? state.modelId;
+    state.prompt = prompt ?? template.prompt; state.promptDraft = state.prompt;
+    if (!preserveModel) state.modelId = template.modelId ?? state.modelId;
     delete state.error; delete state.editingStatus;
-    if (template.execution === 'edit') { state.status = 'editing'; this.emit(state); }
+    if (defer || template.execution === 'edit') { state.status = 'editing'; this.emit(state); }
     else this.begin(state);
   }
   editPrompt(tabId: number, id: string | undefined) {

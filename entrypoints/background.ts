@@ -81,7 +81,7 @@ export default defineBackground(() => {
       const saved = await readSaved();
       void chrome.action.setTitle({ title: `Selio · ${translator(saved.preferences.uiLanguage)('阅读助手')}` });
       void chrome.contextMenus.update('selio-read', { title: translator(saved.preferences.uiLanguage)('用 Selio 理解选中文字') }).catch(() => undefined);
-      for (const port of ports.keys()) post(port, { type: 'preferences', preferences: saved.preferences, modelName: saved.models.find(m => m.id === saved.defaultModelId)?.name ?? '未配置模型', models: saved.models.map(({ id, name, provider, model }) => ({ id, name, provider, model })), actions: saved.actions });
+      for (const port of ports.keys()) post(port, { type: 'preferences', preferences: saved.preferences, modelName: saved.models.find(m => m.id === saved.defaultModelId)?.name ?? '未配置模型', models: saved.models.map(({ id, name, provider, model }) => ({ id, name, provider, model })), actions: saved.actions.map(({ id, name, icon, modelId, execution, showInQuickActions }) => ({ id, name, icon, modelId, execution, showInQuickActions })) });
       const tabs = await chrome.tabs.query({});
       for (const tab of tabs) {
         if (tab.id === undefined) continue;
@@ -135,7 +135,7 @@ export default defineBackground(() => {
           await chrome.tabs.get(tabId);
           post(port, { type: 'state', conversation: engine.get(tabId) });
           const saved = await readSaved();
-          post(port, { type: 'preferences', preferences: saved.preferences, modelName: saved.models.find(m => m.id === saved.defaultModelId)?.name ?? '未配置模型', models: saved.models.map(({ id, name, provider, model }) => ({ id, name, provider, model })), actions: saved.actions });
+          post(port, { type: 'preferences', preferences: saved.preferences, modelName: saved.models.find(m => m.id === saved.defaultModelId)?.name ?? '未配置模型', models: saved.models.map(({ id, name, provider, model }) => ({ id, name, provider, model })), actions: saved.actions.map(({ id, name, icon, modelId, execution, showInQuickActions }) => ({ id, name, icon, modelId, execution, showInQuickActions })) });
         }).catch(() => post(port, { type: 'error', error: '该标签页已关闭。' }));
         return;
       }

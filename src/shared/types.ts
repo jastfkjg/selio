@@ -5,6 +5,7 @@ export interface PromptAction {
   id: Action; name: string; icon: ActionIcon; prompt: string; modelId: string | null;
   showInQuickActions: boolean; execution: 'direct' | 'edit';
 }
+export type PublicAction = Omit<PromptAction, 'prompt'>;
 export type Scope = 'selection' | 'paragraph';
 export type Theme = 'system' | 'light' | 'dark';
 export type Provider = 'openai' | 'anthropic' | 'gemini' | 'deepseek' | 'qwen' | 'kimi' | 'custom';
@@ -75,7 +76,7 @@ export interface ChatCommand {
 export type ServerEvent =
   | { type: 'state'; conversation: Conversation | null }
   | { type: 'error'; error: string }
-  | { type: 'preferences'; preferences: Preferences; modelName: string; models: PublicModel[]; actions: PromptAction[] };
+  | { type: 'preferences'; preferences: Preferences; modelName: string; models: PublicModel[]; actions: PublicAction[] };
 export interface ApiMessage { role: 'system' | 'user' | 'assistant'; content: string }
 export const LIMITS = { selection: 12000, paragraph: 16000, question: 4000, output: 32000, history: 24000, turns: 12 };
 

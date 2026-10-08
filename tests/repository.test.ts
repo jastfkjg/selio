@@ -76,3 +76,21 @@ it('updates expired legacy key settings without inventing a missing secret', asy
   expect((await repo.settingsView()).models[0]).toMatchObject({ keyStorage: 'local', hasKey: false });
   expect(local.data['key:model']).toBeUndefined();
 });
+
+it('migrates actions, persists per-template controls, and repairs references after deletion', async () => {
+  const repo = await import('../src/background/repository');
+  const initial = await repo.settingsView(); expect(initial.actions.map(a => a.id)).toEqual(['translate', 'summarize', 'explain']);
+  await repo.saveModel(config, 'SECRET');
+  const action = { id: 'custom:tech' as const, name: 'Technical', icon: 'Code' as const, prompt: 'Explain {{selection}}', modelId: config.id, execution: 'edit' as const, showInQuickActions: false };
+  await repo.saveAction(action);
+  await repo.savePreferences({ ...initial.preferences, action: action.id });
+  vi.resetModules(); const recovered = await import('../src/background/repository');
+  expect((await recovered.settingsView()).actions.at(-1)).toEqual(action);
+  await recovered.deleteModel(config.id);
+  expect((await recovered.settingsView()).actions.at(-1)?.modelId).toBeNull();
+  await recovered.deleteAction(action.id);
+  expect((await recovered.settingsView()).preferences.action).toBe('translate');
+  await expect(recovered.deleteAction('translate')).rejects.toThrow('不能删除');
+  await expect(recovered.saveAction({ ...action, modelId: 'missing' })).rejects.toThrow('模型配置不存在');
+  await expect(recovered.savePreferences({ ...initial.preferences, action: 'custom:missing' })).rejects.toThrow('操作模板不存在');
+});
