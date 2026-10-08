@@ -4,9 +4,9 @@ import { deleteAction, saveAction, deleteModel, mutateSettings, protectStorage, 
 import { translator } from '../src/shared/i18n';
 import { clearUsage, readUsage, recoverUsage, trackedStream } from '../src/background/usage';
 import { ApiError, errorMessage } from '../src/llm/errors';
-import { isAction, originPattern } from '../src/shared/validation';
+import { isAction, originPattern, siteDisabled } from '../src/shared/validation';
 import { ALL_SITES } from '../src/shared/types';
-import type { ChatCommand, Conversation, SelectionSnapshot, ServerEvent } from '../src/shared/types';
+import type { ChatCommand, Conversation, PageSnapshot, SelectionSnapshot, ServerEvent } from '../src/shared/types';
 
 export default defineBackground(() => {
   const ports = new Map<chrome.runtime.Port, number>();
@@ -47,11 +47,14 @@ export default defineBackground(() => {
   const ready = protectStorage().then(async () => {
     await recoverUsage();
     const saved = await chrome.storage.session.get(null);
-    const liveTabs = new Set((await chrome.tabs.query({})).map(t => t.id));
+    const liveTabs = new Map((await chrome.tabs.query({})).map(t => [t.id, t]));
     for (const [key, value] of Object.entries(saved)) {
       if (!key.startsWith('conversation:')) continue;
       const state = value as Conversation;
-      if (liveTabs.has(state.tabId)) engine.restore(state);
+      if (liveTabs.has(state.tabId)) {
+        if (state.page && liveTabs.get(state.tabId)?.url !== state.page.url) state.page.stale = true;
+        engine.restore(state);
+      }
       else await chrome.storage.session.remove(key);
     }
   });
@@ -107,6 +110,49 @@ export default defineBackground(() => {
     });
   });
 
+  const pageLoads = new Map<number, Promise<void>>();
+  const navigationVersions = new Map<number, number>();
+  function loadPage(tabId: number, expectedId?: string, reuse = false): Promise<void> {
+    const pending = pageLoads.get(tabId);
+    if (pending) return pending;
+    const task = (async () => {
+      await ready;
+      const tab = await chrome.tabs.get(tabId);
+      if (!tab.url) throw new Error('无法读取此网页。请点击浏览器工具栏的 Selio 图标授予当前页访问权限，或在设置中授权此网站。');
+      if (!/^https?:\/\//.test(tab.url)) throw new Error('此页面无法提取正文，请在普通文章或文档网页使用。');
+      const saved = await readSaved();
+      if (siteDisabled(new URL(tab.url).hostname, saved.preferences.disabledSites)) throw new Error('此网站已停用 Selio，请在网站权限中启用后重试。');
+      const current = engine.get(tabId);
+      if (reuse && current?.page?.url === tab.url && !current.page.stale) return;
+      const version = navigationVersions.get(tabId) ?? 0;
+      try { await chrome.scripting.executeScript({ target: { tabId }, files: ['content-scripts/page-extractor.js'] }); }
+      catch { throw new Error('无法读取此网页。请点击浏览器工具栏的 Selio 图标授予当前页访问权限，或在设置中授权此网站。'); }
+      const result = await chrome.tabs.sendMessage(tabId, { type: 'selio:extract-page' }, { frameId: 0 }) as { page?: PageSnapshot; error?: string };
+      if (!result.page) throw new Error(result.error || '未能提取正文。');
+      const after = await chrome.tabs.get(tabId);
+      if ((navigationVersions.get(tabId) ?? 0) !== version || after.url !== result.page.url) throw new Error('网页已变化，请刷新正文后继续提问。');
+      engine.startPage(tabId, result.page, saved.preferences, current?.modelId ?? saved.defaultModelId, expectedId);
+    })();
+    pageLoads.set(tabId, task);
+    void task.finally(() => { if (pageLoads.get(tabId) === task) pageLoads.delete(tabId); }).catch(() => undefined);
+    return task;
+  }
+  chrome.action.onClicked.addListener(tab => {
+    if (tab.id === undefined) return;
+    const tabId = tab.id;
+    // Keep this synchronous with the toolbar gesture, before extraction or storage work.
+    void chrome.sidePanel.open({ tabId }).catch(() => undefined);
+    void ready.then(async () => {
+      const saved = await readSaved();
+      if (saved.preferences.autoSelection && tab.url && /^https?:\/\//.test(tab.url) && !siteDisabled(new URL(tab.url).hostname, saved.preferences.disabledSites)) {
+        void chrome.scripting.executeScript({ target: { tabId }, files: ['content-scripts/content.js'] }).catch(() => undefined);
+      }
+      await loadPage(tabId, engine.get(tabId)?.id, true);
+    }).catch(error => {
+      for (const [port, id] of ports) if (id === tabId) post(port, { type: 'error', error: error instanceof Error ? error.message : '未能提取正文。' });
+    });
+  });
+
   chrome.contextMenus.onClicked.addListener((info, tab) => {
     if (info.menuItemId !== 'selio-read' || tab?.id === undefined || !info.selectionText) return;
     // Must run before any await to preserve Chrome's user activation.
@@ -142,8 +188,13 @@ export default defineBackground(() => {
       const tabId = ports.get(port);
       if (tabId === undefined) return;
       const command = message as ChatCommand;
+      if (!trusted(port.sender ?? {}, ['sidepanel.html']) && engine.get(tabId)?.page && command.type !== 'start' && command.type !== 'stop') return;
       const previous = tabQueues.get(tabId) ?? ready;
       const next = previous.then(async () => {
+        if (command.type === 'ask' || command.type === 'retry') {
+          const state = engine.get(tabId);
+          if (state?.page && (await chrome.tabs.get(tabId)).url !== state.page.url) engine.stalePage(tabId);
+        }
         switch (command.type) {
           case 'start': {
             if (!command.selection) throw new Error('请先选中文字。');
@@ -206,6 +257,12 @@ export default defineBackground(() => {
       if (!trusted(sender)) throw new Error('此操作只能从 Selio 设置或扩展页面发起。');
       const p = message.payload;
       switch (message.type) {
+        case 'page:load': {
+          if (!trusted(sender, ['sidepanel.html']) || !Number.isInteger(p?.tabId)) throw new Error('标签页无效。');
+          if (p.ensure && engine.get(p.tabId)) return;
+          await loadPage(p.tabId, p.conversationId);
+          return;
+        }
         case 'usage:get': return readUsage();
         case 'usage:clear': await clearUsage(); return [];
         case 'settings:get': return settingsView();
@@ -277,6 +334,7 @@ export default defineBackground(() => {
           return;
         }
         case 'data:clear': {
+          for (const tabId of pageLoads.keys()) navigationVersions.set(tabId, (navigationVersions.get(tabId) ?? 0) + 1);
           engine.clear();
           for (const timer of saveTimers.values()) clearTimeout(timer);
           saveTimers.clear();
@@ -297,9 +355,15 @@ export default defineBackground(() => {
     return true;
   });
   chrome.tabs.onRemoved.addListener(tabId => {
+    navigationVersions.set(tabId, (navigationVersions.get(tabId) ?? 0) + 1);
     engine.remove(tabId);
     clearTimeout(saveTimers.get(tabId)); saveTimers.delete(tabId);
     void (writeQueues.get(tabId) ?? Promise.resolve()).then(() => chrome.storage.session.remove(`conversation:${tabId}`));
   });
-  chrome.tabs.onUpdated.addListener((tabId, info) => { if (info.status === 'loading') engine.stop(tabId); });
+  chrome.tabs.onUpdated.addListener((tabId, info) => {
+    if (info.status === 'loading' || info.url) {
+      navigationVersions.set(tabId, (navigationVersions.get(tabId) ?? 0) + 1);
+      engine.stop(tabId); engine.stalePage(tabId);
+    }
+  });
 });

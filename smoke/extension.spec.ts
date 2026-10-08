@@ -585,3 +585,117 @@ test('saved API keys survive a complete browser restart', async () => {
   expect(JSON.stringify(stored.local)).toContain('mock-anthropic-key');
   expect(JSON.stringify(stored.session)).not.toContain('mock-key-for-testing');
 });
+
+test('Ask This Page extracts without selection, exposes request evidence and refreshes safely', async () => {
+  const page = await context.newPage();
+  await page.goto(origin + '/ask-page');
+  const manager = await context.newPage();
+  await manager.goto('chrome://extensions');
+  await manager.evaluate(async ({ id, host }) => {
+    const api = (chrome as unknown as { developerPrivate: { addHostPermission: (id: string, host: string) => Promise<void> } }).developerPrivate;
+    await api.addHostPermission(id, host);
+  }, { id: extensionId, host: `${origin}/*` });
+  await manager.close();
+  // The earlier revocation test removed optional host permissions. Complete the
+  // extension's own permission request after granting consent in Chromium.
+  await settings.getByRole('button', { name: 'Privacy & access' }).click();
+  await settings.getByLabel('Website address').fill(origin);
+  await settings.getByRole('button', { name: 'Allow website', exact: true }).click();
+  await expect.poll(() => worker.evaluate(host => chrome.permissions.contains({ origins: [host] }), `${origin}/*`)).toBe(true);
+  const popup = await context.newPage();
+  await page.bringToFront();
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+  const before = requests.length;
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe('');
+  expect((await worker.evaluate(() => chrome.runtime.getManifest())).action?.default_popup).toBeUndefined();
+  await popup.getByRole('button', { name: 'Open reading sidebar' }).click();
+  await page.bringToFront();
+  await expect.poll(async () => worker.evaluate(async () => (await chrome.runtime.getContexts({})).some(c => c.contextType === 'SIDE_PANEL'))).toBe(true);
+  const cdp = await context.newCDPSession(page);
+  const target = (await cdp.send('Target.getTargets')).targetInfos.find(t => t.url.endsWith('/sidepanel.html'))!;
+  const { sessionId } = await cdp.send('Target.attachToTarget', { targetId: target.targetId, flatten: false });
+  let nextId = 0;
+  const command = <T,>(method: string, params: Record<string, unknown> = {}) => new Promise<T>((resolve, reject) => {
+    const id = ++nextId;
+    const receive = (event: { sessionId: string; message: string }) => {
+      if (event.sessionId !== sessionId) return;
+      const reply = JSON.parse(event.message);
+      if (reply.id !== id) return;
+      cdp.off('Target.receivedMessageFromTarget', receive);
+      if (reply.error) reject(new Error(reply.error.message)); else resolve(reply.result);
+    };
+    cdp.on('Target.receivedMessageFromTarget', receive);
+    void cdp.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id, method, params }) }).catch(reject);
+  });
+  const evaluate = async <T,>(expression: string) => (await command<{ result: { value: T } }>('Runtime.evaluate', { expression, returnByValue: true })).result.value;
+  const text = () => evaluate<string>('document.body.innerText');
+  const click = async (label: string, tag = 'button') => {
+    await expect.poll(() => evaluate<boolean>(`(() => { const el = [...document.querySelectorAll(${JSON.stringify(tag)})].find(el => el.textContent.includes(${JSON.stringify(label)}) || el.getAttribute('aria-label') === ${JSON.stringify(label)}); return Boolean(el && !el.disabled); })()`)).toBe(true);
+    const point = await evaluate<{ x: number; y: number }>(`(() => { const el = [...document.querySelectorAll(${JSON.stringify(tag)})].find(el => el.textContent.includes(${JSON.stringify(label)}) || el.getAttribute('aria-label') === ${JSON.stringify(label)}); el.scrollIntoView({block:'center'}); const r = el.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+    await command('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
+    await command('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
+  };
+  await expect.poll(text).toContain('What would you like to know?');
+  expect(requests.length).toBe(before);
+  await command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  await click('Inspect extracted content', 'summary');
+  await expect.poll(text).toContain('Extracted locally. Selected passages');
+  await click('Inspect extracted content', 'summary');
+  await writeFile('test-results/ask-page-ready.png', Buffer.from((await command<{ data: string }>('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+  await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
+  await click('What is this article mainly about?');
+  await expect.poll(() => requests.length).toBe(before + 1);
+  await expect.poll(text).toContain('Complete');
+  const source = JSON.parse(requests.at(-1)!.messages[1]!.content);
+  expect(source.passages.map((p: { text: string }) => p.text).join('')).toContain('Attention is the beginning');
+  expect(JSON.stringify(source)).not.toContain('private input');
+  expect(JSON.stringify(source)).not.toContain('editable text');
+  expect(source.coverage.partial).toBe(false);
+  await click('Passages used for this answer', 'summary');
+  await expect.poll(text).toContain('All extracted text was provided.');
+  await click('[1]', '.message-assistant summary');
+  await expect.poll(text).toContain('Attention is the beginning');
+  expect(await evaluate<boolean>('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await writeFile('test-results/ask-page-evidence.png', Buffer.from((await command<{ data: string }>('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+  // An extraction failure must preserve the conversation, and must not call a model.
+  await page.evaluate(() => { document.body.innerHTML = '<canvas></canvas>'; });
+  await click('Refresh page');
+  await expect.poll(text).toContain('No reliable main content');
+  expect(await text()).toContain('What is this article mainly about?');
+  expect(requests.length).toBe(before + 1);
+  await page.reload();
+  await expect.poll(text).toContain('The page has changed');
+  expect(await evaluate<boolean>('document.querySelector("textarea").disabled')).toBe(true);
+  await click('Refresh page');
+  await expect.poll(text).toContain('What would you like to know?');
+  expect(requests.length).toBe(before + 1);
+  // Retrieve an implementation section near the end, rather than just the opening DOM text.
+  await page.evaluate(() => {
+    const main = document.createElement('main');
+    for (let i = 0; i < 45; i++) {
+      const section = document.createElement('section');
+      section.innerHTML = `<h2>Section ${i}</h2><p>${'General background on reading. '.repeat(60)}</p>`;
+      main.append(section);
+    }
+    const tail = document.createElement('section');
+    tail.innerHTML = '<h2>Implementation details</h2><p>The implementation uses an inverted index and a bounded passage budget.</p><pre>function retrieve() { return index.query(); }</pre>';
+    main.append(tail); document.body.replaceChildren(main);
+  });
+  await click('Refresh page');
+  await expect.poll(text).toContain('What would you like to know?');
+  await click('Does the article explain implementation details?');
+  await expect.poll(() => requests.length).toBe(before + 2);
+  await expect.poll(text).toContain('Complete');
+  const longSource = JSON.parse(requests.at(-1)!.messages[1]!.content);
+  expect(longSource.coverage.mode).toBe('retrieval');
+  expect(longSource.coverage.partial).toBe(true);
+  expect(longSource.coverage.suppliedCharacters).toBeLessThanOrEqual(16000);
+  expect(JSON.stringify(longSource.passages)).toContain('inverted index');
+  await settings.getByRole('button', { name: 'Reading preferences' }).click();
+  await choose(settings, 'Appearance', 'Dark');
+  await page.bringToFront();
+  await expect.poll(() => evaluate<string>('document.querySelector(".selio-root")?.getAttribute("data-theme")')).toBe('dark');
+  await expect.poll(text).toContain('Relevant excerpts');
+  await writeFile('test-results/ask-page-dark.png', Buffer.from((await command<{ data: string }>('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+  await cdp.detach(); await popup.close(); await page.close();
+});

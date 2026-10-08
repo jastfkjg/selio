@@ -3,9 +3,10 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   webExt: { disabled: true },
+  hooks: { 'build:manifestGenerated': (_wxt, manifest) => { if (manifest.action) delete manifest.action.default_popup; } },
   manifest: {
     name: 'Selio — AI Reading Companion',
-    description: 'Select. Understand. Explore. Translate, summarize and explain selected text, then keep the conversation going.',
+    description: 'Ask questions about the current page, or select text to translate, summarize and explain.',
     minimum_chrome_version: '116',
     permissions: ['storage', 'scripting', 'activeTab', 'contextMenus', 'sidePanel'],
     optional_host_permissions: ['https://*/*', 'http://*/*'],

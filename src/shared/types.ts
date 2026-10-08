@@ -41,9 +41,17 @@ export type PublicModel = Pick<ModelConfig, 'id' | 'name' | 'provider' | 'model'
 export interface Settings { actions: PromptAction[]; preferences: Preferences; models: ModelView[]; defaultModelId: string | null }
 export interface Rect { x: number; y: number; width: number; height: number }
 export interface SelectionSnapshot { text: string; paragraph?: string; rect: Rect; pageTitle: string }
-export interface Message { id: string; role: 'user' | 'assistant'; content: string; stopped?: boolean }
+export interface PageChunk { id: number; heading: string; text: string; start: number; end: number }
+export interface PageSnapshot {
+  title: string; url: string; capturedAt: number; method: 'readability' | 'semantic';
+  chunks: PageChunk[]; totalCharacters: number; truncated: boolean; stale?: boolean;
+}
+export interface PageContext { mode: 'full' | 'retrieval' | 'overview'; chunkIds: number[]; characters: number }
+export interface Message { pageContext?: PageContext; id: string; role: 'user' | 'assistant'; content: string; stopped?: boolean }
 export type ConversationBranch = Pick<Conversation, 'messages' | 'draft' | 'status' | 'error' | 'modelId' | 'modelName' | 'selection' | 'template' | 'prompt' | 'promptDraft' | 'editingStatus'>;
 export interface Conversation {
+  page?: PageSnapshot;
+  pageContext?: PageContext;
   template?: PromptAction;
   prompt?: string;
   promptDraft?: string;

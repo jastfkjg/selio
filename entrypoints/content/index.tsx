@@ -25,6 +25,7 @@ function App({ host }: { host: HTMLElement }) {
   const cancelHover = () => clearTimeout(hoverTimer.current);
   useEffect(() => () => clearTimeout(hoverTimer.current), [selection]);
   const [open, setOpen] = useState(false);
+  useEffect(() => { if (session.conversation?.page) setOpen(false); }, [session.conversation?.page]);
   const [access, setAccess] = useState(true);
   const accessRevoked = useRef(false);
   const previousAllSites = useRef(false);
