@@ -1,0 +1,142 @@
+import { defineContentScript } from 'wxt/utils/define-content-script';
+import { createRoot } from 'react-dom/client';
+import { useEffect, useRef, useState } from 'react';
+import { computePosition, flip, offset, shift } from '@floating-ui/dom';
+import style from '../../src/styles.css?inline';
+import { Chat } from '../../src/components/Chat';
+import { Mark } from '../../src/components/Brand';
+import { useChat } from '../../src/hooks/useChat';
+import { useTheme } from '../../src/hooks/useTheme';
+import { paragraphFromRange, snapshotSelection } from '../../src/shared/selection';
+import { siteDisabled } from '../../src/shared/validation';
+import { rpc } from '../../src/shared/rpc';
+import type { SelectionSnapshot } from '../../src/shared/types';
+
+function App({ host }: { host: HTMLElement }) {
+  const session = useChat();
+  const theme = useTheme(session.preferences.theme);
+  const [selection, setSelection] = useState<SelectionSnapshot | null>(null);
+  const [pending, setPending] = useState<SelectionSnapshot | null>(null);
+  const [open, setOpen] = useState(false);
+  const [access, setAccess] = useState(true);
+  const [anchor, setAnchor] = useState<SelectionSnapshot | null>(null);
+  const range = useRef<Range | null>(null);
+  const chatRange = useRef<Range | null>(null);
+  const pendingRange = useRef<Range | null>(null);
+  const icon = useRef<HTMLButtonElement>(null);
+  const floating = useRef<HTMLDivElement>(null);
+  const state = useRef({ open, chat: session.conversation, preferences: session.preferences });
+  state.current = { open, chat: session.conversation, preferences: session.preferences };
+  useEffect(() => {
+    let debounce: ReturnType<typeof setTimeout>;
+    let pointerDown = false;
+    let accessRevoked = false;
+    const detect = () => {
+      if (pointerDown || document.activeElement === host) return;
+      const preferences = state.current.preferences;
+      if (accessRevoked || !preferences.autoSelection || siteDisabled(location.hostname, preferences.disabledSites)) { setSelection(null); return; }
+      const current = window.getSelection();
+      if (current?.anchorNode && host.contains(current.anchorNode)) return;
+      const saved = snapshotSelection(current, document.title);
+      if (saved && !(state.current.open && saved.snapshot.text === state.current.chat?.selection.text)) { range.current = saved.range; setSelection(saved.snapshot); }
+      else setSelection(null);
+    };
+    const changed = () => { clearTimeout(debounce); debounce = setTimeout(detect, 160); };
+    const down = (event: PointerEvent) => {
+      if (event.composedPath().includes(host)) return;
+      pointerDown = true;
+      const { open, chat } = state.current;
+      const input = host.shadowRoot?.querySelector('textarea');
+      if (open && chat?.status !== 'generating' && !chat?.draft && !input?.value && host.shadowRoot?.activeElement !== input) setOpen(false);
+    };
+    const up = () => { pointerDown = false; changed(); };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && state.current.chat?.status !== 'generating' && !state.current.chat?.draft) { setOpen(false); setSelection(null); }
+    };
+    const message = (message: { type: string; text?: string; origins?: string[] }, _sender: chrome.runtime.MessageSender, respond: (data: unknown) => void) => {
+      if (message.type === 'selio:revoked' && message.origins?.some(pattern => {
+        try { const url = new URL(pattern.replace(/\/\*$/, '/')); return url.hostname === location.hostname && url.protocol === location.protocol; } catch { return pattern === '<all_urls>'; }
+      })) { accessRevoked = true; setAccess(false); setSelection(null); }
+      if (message.type === 'selio:enabled') { accessRevoked = false; setAccess(true); }
+      if (message.type === 'selio:paragraph') {
+        const saved = chatRange.current;
+        const current = state.current.chat;
+        if (saved && saved.startContainer.isConnected && current?.selection.text === message.text) respond({ paragraph: paragraphFromRange(saved) });
+        else respond(null);
+      }
+    };
+    document.addEventListener('selectionchange', changed);
+    document.addEventListener('pointerdown', down, true);
+    document.addEventListener('pointerup', up, true);
+    document.addEventListener('keydown', key, true);
+    chrome.runtime.onMessage.addListener(message);
+    return () => { clearTimeout(debounce); document.removeEventListener('selectionchange', changed); document.removeEventListener('pointerdown', down, true); document.removeEventListener('pointerup', up, true); document.removeEventListener('keydown', key, true); chrome.runtime.onMessage.removeListener(message); };
+  }, [host]);
+  useEffect(() => {
+    if (!session.preferences.autoSelection || siteDisabled(location.hostname, session.preferences.disabledSites)) setSelection(null);
+  }, [session.preferences]);
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => floating.current?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+  useEffect(() => {
+    const position = () => {
+      const rect = (saved: SelectionSnapshot, currentRange: Range | null) => {
+        if (currentRange?.startContainer.isConnected) {
+          const rects = currentRange.getClientRects();
+          return rects[rects.length - 1] ?? currentRange.getBoundingClientRect();
+        }
+        return new DOMRect(saved.rect.x, saved.rect.y, saved.rect.width, saved.rect.height);
+      };
+      if (selection && icon.current) {
+        const button = icon.current;
+        void computePosition({ getBoundingClientRect: () => rect(selection, range.current) }, button, { strategy: 'fixed', placement: 'bottom-end', middleware: [offset(7), flip(), shift({ padding: 8 })] }).then(({ x, y }) => { button.style.left = `${x}px`; button.style.top = `${y}px`; });
+      }
+      if (open && anchor && floating.current) {
+        const element = floating.current;
+        void computePosition({ getBoundingClientRect: () => rect(anchor, chatRange.current) }, element, { strategy: 'fixed', placement: 'bottom-end', middleware: [offset(10), flip(), shift({ padding: 12, crossAxis: true })] }).then(({ x, y }) => { element.style.left = `${x}px`; element.style.top = `${y}px`; });
+      }
+    };
+    position();
+    const observer = new ResizeObserver(position);
+    if (floating.current) observer.observe(floating.current);
+    window.addEventListener('scroll', position, true); window.addEventListener('resize', position);
+    return () => { observer.disconnect(); window.removeEventListener('scroll', position, true); window.removeEventListener('resize', position); };
+  }, [selection, open, anchor]);
+  const start = (snapshot: SelectionSnapshot, selectedRange: Range | null) => {
+    chatRange.current = selectedRange;
+    const source = { ...snapshot };
+    if (session.preferences.scope === 'paragraph' && selectedRange) source.paragraph = paragraphFromRange(selectedRange);
+    setAnchor(source); setOpen(true); setSelection(null); setPending(null);
+    session.send({ type: 'start', selection: source });
+  };
+  const launch = () => {
+    if (!selection) return;
+    if (session.conversation) {
+      setOpen(true); setAnchor(selection);
+      if (selection.text !== session.conversation.selection.text) { setPending(selection); pendingRange.current = range.current; }
+      setSelection(null);
+    } else start(selection, range.current);
+  };
+  return <div className="selio-root overlay" data-theme={theme}>
+    {access && selection && session.connected && <button ref={icon} className="selection-launcher" aria-label="用 Selio 阅读选中文字" title={`Selio · ${selection.text.slice(0, 60)}`} onPointerDown={e => e.preventDefault()} onClick={e => { if (e.isTrusted) launch(); }}><Mark size={24}/></button>}
+    {open && <div ref={floating} tabIndex={-1} className="floating-container" role="dialog" aria-modal="false" aria-label="Selio 对话" onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } }}><Chat session={session} onClose={() => setOpen(false)} onPin={() => void rpc('chat:pin').then(() => setOpen(false), e => session.setError(e.message))} pending={pending} onAccept={() => { if (pending) start(pending, pendingRange.current); }} onDismiss={() => setPending(null)}/></div>}
+  </div>;
+}
+export default defineContentScript({
+  // Runtime registration supplies matches only after an explicit site grant.
+  // Declaring matches here would make WXT generate permanent host permissions.
+  registration: 'runtime', cssInjectionMode: 'manual',
+  main(ctx) {
+    if (document.querySelector('selio-assistant')) return;
+    const host = document.createElement('selio-assistant');
+    host.style.cssText = 'all:initial!important;position:fixed!important;inset:0!important;z-index:2147483647!important;pointer-events:none!important;';
+    const shadow = host.attachShadow({ mode: 'open' });
+    const css = document.createElement('style'); css.textContent = style;
+    const container = document.createElement('div'); shadow.append(css, container);
+    document.documentElement.append(host);
+    const root = createRoot(container); root.render(<App host={host}/>);
+    ctx.onInvalidated(() => { root.unmount(); host.remove(); });
+  },
+});

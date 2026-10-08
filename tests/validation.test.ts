@@ -1,0 +1,23 @@
+import { describe, expect, it } from 'vitest';
+import { apiEndpoint, validateModel, validatePreferences } from '../src/shared/validation';
+import { DEFAULT_PREFERENCES, type ModelConfig } from '../src/shared/types';
+export const model: ModelConfig = { id: 'test-model', name: 'Test', provider: 'custom', baseUrl: 'https://example.com/v1', model: 'mock', maxTokens: 2048, keyStorage: 'session' };
+describe('model configuration', () => {
+  it('normalizes an endpoint without duplicating chat/completions', () => {
+    expect(apiEndpoint('https://example.com/v1/')).toBe('https://example.com/v1/chat/completions');
+    expect(apiEndpoint('https://example.com/v1/chat/completions')).toBe('https://example.com/v1/chat/completions');
+    expect(apiEndpoint('http://localhost:8787/v1')).toBe('http://localhost:8787/v1/chat/completions');
+  });
+  it.each(['http://example.com', 'file:///etc/passwd', 'javascript:alert(1)', 'https://key@example.com', 'https://example.com?api_key=secret', 'https://example.com/#key'])('rejects unsafe endpoint %s', url => {
+    expect(() => apiEndpoint(url)).toThrow();
+  });
+  it('strips unknown properties, including a key accidentally attached to metadata', () => {
+    expect(validateModel({ ...model, apiKey: 'secret' } as ModelConfig)).not.toHaveProperty('apiKey');
+  });
+  it.each([{ maxTokens: 0 }, { maxTokens: 1.5 }, { temperature: NaN }, { temperature: 3 }, { id: '../key' }, { model: ' ' }])('rejects invalid fields %s', patch => {
+    expect(() => validateModel({ ...model, ...patch })).toThrow();
+  });
+  it('does not let a preference payload set granted origins', () => {
+    expect(validatePreferences({ ...DEFAULT_PREFERENCES, grantedSites: ['https://evil.com/*'] }).grantedSites).toEqual([]);
+  });
+});
