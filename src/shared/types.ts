@@ -1,8 +1,10 @@
 export type Action = 'translate' | 'summarize' | 'explain';
 export type Scope = 'selection' | 'paragraph';
 export type Theme = 'system' | 'light' | 'dark';
-export type Provider = 'openai' | 'deepseek' | 'custom';
+export type Provider = 'openai' | 'anthropic' | 'gemini' | 'deepseek' | 'qwen' | 'kimi' | 'custom';
+export type UILanguage = 'en' | 'zh-CN';
 export interface Preferences {
+  uiLanguage: UILanguage;
   action: Action;
   language: string;
   theme: Theme;
@@ -12,7 +14,7 @@ export interface Preferences {
   grantedSites: string[];
 }
 export const DEFAULT_PREFERENCES: Preferences = {
-  action: 'translate', language: '简体中文', theme: 'system', autoSelection: true,
+  uiLanguage: 'en', action: 'translate', language: '简体中文', theme: 'system', autoSelection: true,
   scope: 'selection', disabledSites: [], grantedSites: [],
 };
 export const ACTIONS: Record<Action, string> = { translate: '翻译', summarize: '总结', explain: '解释' };

@@ -40,3 +40,15 @@ describe('trusted storage', () => {
     expect(local.data['key:model']).toBeUndefined(); expect(session.data['key:model']).toBeUndefined();
   });
 });
+
+it('migrates existing preferences to English without losing models, keys or answer language', async () => {
+  const repo = await import('../src/background/repository');
+  local.data.settings = { preferences: { action: 'explain', language: '日本語', theme: 'dark', autoSelection: false, scope: 'paragraph', disabledSites: ['example.com'], grantedSites: [] }, models: [config], defaultModelId: config.id };
+  session.data['key:model'] = 'SECRET';
+  const view = await repo.settingsView();
+  expect(view.preferences).toMatchObject({ uiLanguage: 'en', language: '日本語', theme: 'dark', autoSelection: false });
+  expect(view.models[0]).toEqual({ ...config, hasKey: true });
+  await repo.savePreferences({ ...view.preferences, uiLanguage: 'zh-CN' });
+  expect((await repo.settingsView()).preferences).toMatchObject({ uiLanguage: 'zh-CN', language: '日本語' });
+  expect(await repo.readKey(config)).toBe('SECRET');
+});

@@ -12,7 +12,8 @@ export function protectStorage(): Promise<void> {
 export async function readSaved(): Promise<Saved> {
   await protectStorage();
   const { settings } = await chrome.storage.local.get('settings');
-  return (settings as Saved | undefined) ?? { preferences: { ...DEFAULT_PREFERENCES }, models: [], defaultModelId: null };
+  const saved = (settings as Saved | undefined) ?? { models: [], defaultModelId: null };
+  return { ...saved, preferences: { ...DEFAULT_PREFERENCES, ...('preferences' in saved ? saved.preferences : {}) } };
 }
 export async function readKey(model: ModelConfig): Promise<string> {
   await protectStorage();

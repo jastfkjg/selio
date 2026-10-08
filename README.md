@@ -15,7 +15,7 @@ pnpm dev
 
 1. 打开 Chrome 的 `chrome://extensions`，开启右上角「开发者模式」。
 2. 点击「加载已解压的扩展程序」，选择本项目的 `.output/chrome-mv3-dev` 目录。开发服务器保持运行，浏览器手动加载扩展；控制台也会打印实际输出路径。
-3. 将工具栏中的 Selio 固定，点击 Selio → 设置。
+3. 将工具栏中的 Selio 固定，点击 Selio → Open settings。界面默认英文；右上角语言菜单可切换为简体中文，下文操作名称使用中文。
 4. 在「模型」填写 Provider、Base URL、模型标识和自己的 API Key，点击「保存模型」，在 Chrome 弹窗中授权该 API 来源。
 5. 点击「测试连接」。该操作会向所选供应商发送一个简短测试请求，可能产生少量 API 用量。
 6. 打开普通 HTTP/HTTPS 网页，点击工具栏 Selio →「允许此网站自动划词」。在 Chrome 弹窗中确认网站访问权限。
@@ -42,27 +42,34 @@ pnpm zip
 - **侧边栏**：点击浮窗右上角的固定按钮，原始选区、消息、生成状态和草稿接续到 Chrome Side Panel，不会重新调用模型。侧边栏跟随当前窗口的活动标签页，每个标签页有独立会话。
 - **右键菜单**：选中文字 →「用 Selio 理解选中文字」，在侧边栏执行默认动作。已有对话时先提示切换。此入口只使用浏览器提供的选中文字，不自动读取段落。
 - **上下文**：默认只发送选中文字。选择「选中文字 + 所在段落」才读取和发送段落；仅使用相近的 p/li/pre/blockquote/td/标题元素，不用 body 或大块 div 作为整页回退。选区失效时提示重新选择。
+- **界面语言**：默认 English，与浏览器或用户 profile 无关。设置页右上角或 Reading preferences 中切换 English / 简体中文，自动保存到本机；浮窗、侧边栏、工具栏弹窗和右键菜单同步更新。界面语言与翻译/解释目标语言独立，升级时保留旧目标语言和模型配置。
 - **设置**：多个模型、默认模型、默认动作、目标语言、浅色/深色/系统主题、划词开关、网站禁用列表、清除数据。
 
 ## 模型配置
 
-支持 **OpenAI-compatible Chat Completions + SSE**。
+支持 **OpenAI-compatible Chat Completions + SSE** 和 **Anthropic 原生 Messages + SSE**。供应商菜单提供品牌标识、协议提示与键盘导航（方向键、Home/End、首字母、Enter、Escape）。
 
 | Provider | 默认 Base URL | 默认模型标识 |
 | --- | --- | --- |
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
+| Anthropic | `https://api.anthropic.com/v1` | `claude-sonnet-4-6` |
+| Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-3.8-flash` |
+| Qwen | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
+| Kimi | `https://api.moonshot.ai/v1` | `kimi-k2.5` |
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
 | Custom | 用户填写 | 用户填写 |
 
-模型可用性取决于供应商与账户，所有预设均可编辑。Base URL 自动补全 `/chat/completions`；填写完整接口地址也不会重复拼接。通常应包含供应商要求的 `/v1` 路径。
+模型可用性取决于供应商与账户，所有预设均可编辑。Anthropic Base URL 自动补全 `/messages`，其余自动补全 `/chat/completions`；填写完整接口地址也不会重复拼接。通常应包含供应商要求的 `/v1` 路径。
 
 - API 地址必须是 HTTPS；为本地开发允许 `http://localhost`、`http://127.0.0.1` 和 `http://[::1]`。
 - 不接受 URL 中的用户名、密码、查询参数或片段；禁止 HTTP 重定向，避免带着密钥跳转到其他来源。
-- 默认不发送 Temperature，避免不支持该参数的模型报错；可自行设置 0–2。
-- 最大输出 Tokens 可设 16–8192，默认 2048。适配器发送 `max_tokens`；要求 `max_completion_tokens`、Responses 或原生专有协议的模型暂不兼容。
+- 通常不发送 Temperature；可自行设置 0–2（Anthropic 为 0–1）。Kimi K2.5 预设使用即时模式，发送 `thinking: { type: "disabled" }` 和固定 Temperature 0.6。
+- Qwen 与 Kimi 默认使用国际站地址。中国大陆账户分别改用 `https://dashscope.aliyuncs.com/compatible-mode/v1`、`https://api.moonshot.cn/v1`，密钥必须匹配区域。
+- Anthropic 使用 `x-api-key`、`anthropic-version: 2023-06-01` 与浏览器直连头；System 提示放入顶层字段，单独解析文本事件、终止事件和错误。请求仍仅从后台发出。
+- 最大输出 Tokens 可设 16–8192，默认 2048。适配器发送 `max_tokens`；要求 `max_completion_tokens`、Responses 或其他未适配原生协议的模型暂不兼容。
 - 修改 API 来源时必须重新输入该来源的密钥，不会自动将旧来源的密钥发送过去。
 - 切换默认模型只影响新对话。进行中的对话继续使用原模型；原模型被删除后下一次请求使用当前默认模型。
-- 常见异常（Key 失效、余额/额度、429、模型不存在、服务故障、截断流）有中文反馈，重试由用户主动发起。
+- 常见异常（Key 失效、余额/额度、429、模型不存在、服务故障、截断流）有中英文反馈，重试由用户主动发起。
 
 ### API Key 保存边界
 
@@ -113,7 +120,7 @@ src/
     errors.ts         安全错误映射，不反射原始服务响应
   components/         共享 Chat、品牌组件
   hooks/              Port 重连与主题
-  shared/             类型、验证、选区快照与 RPC
+  shared/             类型、验证、供应商预设、中英文文案、选区快照与 RPC
 ```
 
 后台是会话状态的唯一所有者，按 tabId / conversationId / requestId 隔离。浮窗与侧边栏订阅同一状态，草稿逐次同步；Port 每 10 秒发轻量心跳，5 秒未收到响应会主动重连，也处理 Chrome 未及时通知断线的情况。内存状态按约 400ms 间隔写入 `storage.session`，请求结束立即保存。后台意外终止后，重连读取最近快照并将旧的生成状态标记为中断，**不会自动重复请求或重复计费**。极端终止时可能损失最后约 400ms 的增量。
@@ -139,12 +146,12 @@ pnpm test:smoke
 
 测试不使用真实 API Key：
 
-- 单元测试覆盖文本处理、选区快照、编辑区域排除、动作 Prompt、模型校验、UTF-8/SSE 任意分块、历史预算、HTTP 错误、取消和跨会话竞态。
+- 单元测试覆盖文本处理、选区快照、编辑区域排除、动作 Prompt、模型校验、UTF-8/SSE 任意分块、Anthropic 事件与请求格式、旧设置语言迁移、文案覆盖、历史预算、HTTP 错误、取消和跨会话竞态。
 - Smoke Test 使用原样生产扩展、全新临时 Chromium profile、本地文章与真实 HTTP SSE Mock API。
 - 测试在临时 profile 内通过 Chromium 自身的扩展设置 API 预先记录本机来源的用户授权，再由真实设置表单执行 `permissions.request`。`permissions.contains`、来源列表及真实脚本注册均正常执行，不修改生产 Manifest 或业务代码。原生授权弹窗的点击仍列为手动验证项。
 - 浏览器截图与 trace 输出到 `test-results/`。临时 profile 在测试结束后删除。
 
-本次交付已运行：`pnpm install --frozen-lockfile`、`pnpm dev`（确认开发服务启动后停止）、`pnpm typecheck`、`pnpm lint`、`pnpm test`、`pnpm test:smoke` 和 `pnpm zip`。52 个单元测试与 4 组浏览器 Smoke Test 通过；浏览器测试包括真实 Side Panel 草稿/历史接续、强制停止 Service Worker 后恢复、390px 窄屏、深色主题、可信存储隔离和撤销网站权限。原生侧边栏通过 CDP 的实际侧边栏目标读取与截图，不使用另建页面代替。
+本次交付已运行：`pnpm install --frozen-lockfile`、`pnpm dev`（确认开发服务启动后停止）、`pnpm typecheck`、`pnpm lint`、`pnpm test`、`pnpm test:smoke` 和 `pnpm zip`。68 个单元测试与 5 组浏览器 Smoke Test 通过；浏览器测试包括英文默认值、中英文切换与持久化、Provider 菜单键盘操作、Anthropic 原生 Messages 配置/连接/生成流程、真实 Side Panel 草稿/历史接续、强制停止 Service Worker 后恢复、390px 窄屏、深色主题、可信存储隔离和撤销网站权限。原生侧边栏通过 CDP 的实际侧边栏目标读取与截图，不使用另建页面代替。
 
 建议手动复核：Chrome 原生授权弹窗的同意/取消、右键菜单、侧边栏在多窗口之间的跟随、浏览器工具栏 activeTab 生命周期、关闭浏览器后的会话 Key 清除、不同真实模型供应商的兼容性。
 
@@ -159,7 +166,7 @@ pnpm test:smoke
 - 不读取整页正文，不解析 PDF，不做 OCR、RAG、长期记忆、登录、支付或云同步。
 - 本地测试验证协议与产品流程；未使用真实付费 API 验证供应商账户、模型权限或计费。
 
-后续可按需扩展：Gemini/Anthropic/Ollama 原生适配器、经过明确同意的正文提取、更多输入区域支持，以及更精细的 Token 预算。无需预先引入独立后端。
+后续可按需扩展：Gemini/Ollama 原生适配器、经过明确同意的正文提取、更多输入区域支持，以及更精细的 Token 预算。无需预先引入独立后端。
 
 ## 实现参考
 
@@ -168,3 +175,12 @@ pnpm test:smoke
 - [Chrome Storage 访问级别与会话存储](https://developer.chrome.com/docs/extensions/reference/api/storage)
 - [Chrome Side Panel API](https://developer.chrome.com/docs/extensions/reference/api/sidePanel)
 - [Playwright 扩展测试](https://playwright.dev/docs/chrome-extensions)
+
+## 供应商接口参考
+
+- [Anthropic Messages / SSE](https://platform.claude.com/docs/en/build-with-claude/streaming)
+- [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)
+- [Qwen / DashScope compatibility](https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope)
+- [Kimi API](https://platform.kimi.ai/docs/overview)、[Kimi K2.5 参数](https://huggingface.co/moonshotai/Kimi-K2.5)
+
+供应商模型列表会变化，预设只是起点，可按账户支持的模型修改 Model ID。验证使用本地 Mock API，不包含付费线上调用。

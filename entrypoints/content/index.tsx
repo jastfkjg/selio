@@ -10,10 +10,12 @@ import { useTheme } from '../../src/hooks/useTheme';
 import { paragraphFromRange, snapshotSelection } from '../../src/shared/selection';
 import { siteDisabled } from '../../src/shared/validation';
 import { rpc } from '../../src/shared/rpc';
+import { translator } from '../../src/shared/i18n';
 import type { SelectionSnapshot } from '../../src/shared/types';
 
 function App({ host }: { host: HTMLElement }) {
   const session = useChat();
+  const t = translator(session.preferences.uiLanguage);
   const theme = useTheme(session.preferences.theme);
   const [selection, setSelection] = useState<SelectionSnapshot | null>(null);
   const [pending, setPending] = useState<SelectionSnapshot | null>(null);
@@ -120,8 +122,8 @@ function App({ host }: { host: HTMLElement }) {
     } else start(selection, range.current);
   };
   return <div className="selio-root overlay" data-theme={theme}>
-    {access && selection && session.connected && <button ref={icon} className="selection-launcher" aria-label="用 Selio 阅读选中文字" title={`Selio · ${selection.text.slice(0, 60)}`} onPointerDown={e => e.preventDefault()} onClick={e => { if (e.isTrusted) launch(); }}><Mark size={24}/></button>}
-    {open && <div ref={floating} tabIndex={-1} className="floating-container" role="dialog" aria-modal="false" aria-label="Selio 对话" onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } }}><Chat session={session} onClose={() => setOpen(false)} onPin={() => void rpc('chat:pin').then(() => setOpen(false), e => session.setError(e.message))} pending={pending} onAccept={() => { if (pending) start(pending, pendingRange.current); }} onDismiss={() => setPending(null)}/></div>}
+    {access && selection && session.connected && <button ref={icon} className="selection-launcher" aria-label={t("用 Selio 阅读选中文字")} title={`Selio · ${selection.text.slice(0, 60)}`} onPointerDown={e => e.preventDefault()} onClick={e => { if (e.isTrusted) launch(); }}><Mark size={24}/></button>}
+    {open && <div ref={floating} tabIndex={-1} className="floating-container" role="dialog" aria-modal="false" aria-label={t("Selio 对话")} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } }}><Chat session={session} onClose={() => setOpen(false)} onPin={() => void rpc('chat:pin').then(() => setOpen(false), e => session.setError(e.message))} pending={pending} onAccept={() => { if (pending) start(pending, pendingRange.current); }} onDismiss={() => setPending(null)}/></div>}
   </div>;
 }
 export default defineContentScript({

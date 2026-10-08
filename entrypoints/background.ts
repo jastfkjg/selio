@@ -1,7 +1,8 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { ConversationEngine } from '../src/background/conversations';
 import { deleteModel, mutateSettings, protectStorage, readKey, readSaved, saveModel, savePreferences, setDefault, settingsView } from '../src/background/repository';
-import { openAICompatible } from '../src/llm/adapter';
+import { translator } from '../src/shared/i18n';
+import { adapterFor } from '../src/llm/adapter';
 import { ApiError, errorMessage } from '../src/llm/errors';
 import { isAction, originPattern } from '../src/shared/validation';
 import type { ChatCommand, Conversation, SelectionSnapshot, ServerEvent } from '../src/shared/types';
@@ -36,7 +37,7 @@ export default defineBackground(() => {
       const key = await readKey(model);
       if (!key) throw new ApiError('key_missing', '会话密钥已过期，请在设置中重新输入 API Key。');
       if (!await chrome.permissions.contains({ origins: [originPattern(model.baseUrl)] })) throw new ApiError('permission', '尚未授权模型 API 来源，请在设置中编辑并保存模型以授权。');
-      return { modelId: model.id, modelName: model.name, stream: (messages, signal) => openAICompatible.stream(model, key, messages, signal) };
+      return { modelId: model.id, modelName: model.name, stream: (messages, signal) => adapterFor(model.provider).stream(model, key, messages, signal) };
     },
     publish(state) {
       persist(state);
@@ -68,6 +69,8 @@ export default defineBackground(() => {
       if (registered.some(s => s.id === 'selio-selection')) await chrome.scripting.unregisterContentScripts({ ids: ['selio-selection'] });
       if (matches.length) await chrome.scripting.registerContentScripts([{ id: 'selio-selection', matches, js: ['content-scripts/content.js'], runAt: 'document_idle', persistAcrossSessions: true }]);
       const saved = await readSaved();
+      void chrome.action.setTitle({ title: `Selio · ${translator(saved.preferences.uiLanguage)('阅读助手')}` });
+      void chrome.contextMenus.update('selio-read', { title: translator(saved.preferences.uiLanguage)('用 Selio 理解选中文字') }).catch(() => undefined);
       for (const port of ports.keys()) post(port, { type: 'preferences', preferences: saved.preferences, modelName: saved.models.find(m => m.id === saved.defaultModelId)?.name ?? '未配置模型' });
       const tabs = await chrome.tabs.query({});
       for (const tab of tabs) {
@@ -80,7 +83,7 @@ export default defineBackground(() => {
   }
   void ready.then(syncScripts).catch(() => undefined);
   chrome.runtime.onInstalled.addListener(() => {
-    void chrome.contextMenus.removeAll().then(() => chrome.contextMenus.create({ id: 'selio-read', title: '用 Selio 理解选中文字', contexts: ['selection'] }));
+    void readSaved().then(async saved => { await chrome.contextMenus.removeAll(); chrome.contextMenus.create({ id: 'selio-read', title: translator(saved.preferences.uiLanguage)('用 Selio 理解选中文字'), contexts: ['selection'] }); });
   });
   chrome.permissions.onAdded.addListener(() => { void syncScripts(); });
   chrome.permissions.onRemoved.addListener(removed => {
@@ -193,7 +196,7 @@ export default defineBackground(() => {
           const timer = setTimeout(() => controller.abort(), 20000);
           try {
             let received = false;
-            for await (const chunk of openAICompatible.stream({ ...model, maxTokens: 16 }, key, [{ role: 'user', content: 'Reply only with OK.' }], controller.signal)) {
+            for await (const chunk of adapterFor(model.provider).stream({ ...model, maxTokens: 256 }, key, [{ role: 'user', content: 'Reply only with OK.' }], controller.signal)) {
               if (chunk.trim()) { received = true; break; }
             }
             if (!received) throw new ApiError('empty', 'API 未返回文字。');

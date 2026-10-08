@@ -21,3 +21,14 @@ describe('model configuration', () => {
     expect(validatePreferences({ ...DEFAULT_PREFERENCES, grantedSites: ['https://evil.com/*'] }).grantedSites).toEqual([]);
   });
 });
+
+it('normalizes native Messages endpoints and enforces provider parameter limits', () => {
+  expect(apiEndpoint('https://api.anthropic.com/v1/messages/', 'anthropic')).toBe('https://api.anthropic.com/v1/messages');
+  expect(validateModel({ ...model, provider: 'anthropic', baseUrl: 'https://api.anthropic.com/v1/messages' }).baseUrl).toBe('https://api.anthropic.com/v1');
+  expect(() => validateModel({ ...model, provider: 'anthropic', temperature: 1.5 })).toThrow();
+  expect(() => validateModel({ ...model, provider: 'kimi', model: 'kimi-k2.5', temperature: 1 })).toThrow();
+});
+it('validates UI language independently of answer language', () => {
+  expect(validatePreferences({ ...DEFAULT_PREFERENCES, uiLanguage: 'en', language: '日本語' })).toMatchObject({ uiLanguage: 'en', language: '日本語' });
+  expect(() => validatePreferences({ ...DEFAULT_PREFERENCES, uiLanguage: 'auto' } as unknown as typeof DEFAULT_PREFERENCES)).toThrow();
+});

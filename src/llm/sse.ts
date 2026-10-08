@@ -43,3 +43,14 @@ export function parseDelta(data: string): { text: string; finished: boolean } {
   if (choice?.finish_reason === 'length') throw new ApiError('length', '回答达到输出上限，可继续追问或在设置中提高上限。');
   return { text: typeof content === 'string' ? content : '', finished: Boolean(choice?.finish_reason) };
 }
+
+/** Anthropic sends typed events rather than OpenAI choices. Ignore reasoning/tool deltas. */
+export function parseAnthropicDelta(data: string): { text: string; finished: boolean } {
+  let payload;
+  try { payload = JSON.parse(data); } catch { throw new ApiError('invalid_stream', '模型返回了无效的流式数据，请检查接口兼容性。'); }
+  if (payload?.type === 'error' || payload?.error) throw new ApiError('stream_error', '模型服务在生成时返回错误，请检查账户与模型设置。');
+  if (payload?.type === 'message_delta' && payload.delta?.stop_reason === 'max_tokens') throw new ApiError('length', '回答达到输出上限，可继续追问或在设置中提高上限。');
+  const text = payload?.type === 'content_block_delta' && payload.delta?.type === 'text_delta' ? payload.delta.text
+    : payload?.type === 'content_block_start' && payload.content_block?.type === 'text' ? payload.content_block.text : '';
+  return { text: typeof text === 'string' ? text : '', finished: payload?.type === 'message_stop' };
+}
