@@ -1,6 +1,7 @@
 import { test, expect, chromium, type BrowserContext, type Page, type Worker } from '@playwright/test';
+import type { SavedNote } from '../src/shared/types';
 import { createServer, type Server } from 'node:http';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -148,6 +149,28 @@ test('install, configure, select, stream, follow up, preserve, cancel and recove
   await expect(reading.getByText('New selection found')).not.toBeVisible();
   expect(requests.at(-1)!.messages[1]!.content).not.toContain('A good tool');
   await reading.screenshot({ animations: 'disabled', path: 'test-results/selection-chat.png', fullPage: true });
+  await reading.getByRole('button', { name: 'Save', exact: true }).click();
+  await reading.getByLabel('Your note').fill('A useful reading insight');
+  await reading.getByLabel('Tags', { exact: false }).fill('Reading, AI，Reading');
+  await reading.getByRole('button', { name: 'Save note', exact: true }).click();
+  await expect(reading.getByRole('button', { name: 'Saved', exact: true })).toBeVisible();
+  await reading.getByRole('button', { name: 'Saved', exact: true }).click();
+  await expect(reading.getByLabel('Your note')).toHaveValue('A useful reading insight');
+  await reading.screenshot({ animations: 'disabled', path: 'test-results/save-note.png', fullPage: true });
+  await reading.getByRole('button', { name: 'Save note', exact: true }).click();
+  const notes = await worker.evaluate(async () => (await chrome.storage.local.get('notes')).notes as SavedNote[]);
+  expect(notes).toHaveLength(1);
+  expect(notes[0]).toMatchObject({ selection: await reading.locator('#source').innerText(), sourceUrl: origin + '/', sourceTitle: 'Notes on attention', note: 'A useful reading insight', tags: ['Reading', 'AI'] });
+  expect(notes[0]!.answer).toContain('熟悉的想法');
+  const contentAccess = await worker.evaluate(async url => {
+    const tab = (await chrome.tabs.query({})).find(tab => tab.url === url)!;
+    const [result] = await chrome.scripting.executeScript({ target: { tabId: tab.id! }, func: async () => chrome.runtime.sendMessage({ type: 'notes:list' }) });
+    return result!.result;
+  }, reading.url());
+  expect(contentAccess.ok).toBe(false);
+
+  expect(requests.length).toBe(before + 1);
+
   await reading.getByRole('textbox', { name: "Ask a follow-up" }).fill('能举一个例子吗？');
   await reading.getByRole('textbox', { name: "Ask a follow-up" }).press('Enter');
   await expect(reading.getByText('帮助我们看清重要的信息。', { exact: false })).toBeVisible();
@@ -296,6 +319,48 @@ test('side panel reuses the same conversation without another request', async ()
   expect(requests.length).toBe(count);
   const screenshot = await command<{ data: string }>('Page.captureScreenshot', { format: 'png' });
   await writeFile('test-results/sidepanel.png', Buffer.from(screenshot.data, 'base64'));
+  const evaluate = async <T,>(expression: string) => (await command<{ result: { value: T } }>('Runtime.evaluate', { expression, returnByValue: true })).result.value;
+  const click = async (selector: string) => {
+    const point = await evaluate<{ x: number; y: number }>(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); el.scrollIntoView({block:'center'}); const r = el.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+    await command('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
+    await command('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
+  };
+  await click('.panel-navigation button:last-child');
+  await expect.poll(() => evaluate<number>('document.querySelectorAll(".note-row").length')).toBe(1);
+  await click('#notes-search'); await command('Input.insertText', { text: 'unmatched-keyword' });
+  await expect.poll(() => evaluate<string>('document.body.innerText')).toContain('No matching notes');
+  await click('.notes-empty button');
+  await click('#notes-search'); await command('Input.insertText', { text: 'reading insight' });
+  await expect.poll(() => evaluate<number>('document.querySelectorAll(".note-row").length')).toBe(1);
+  await click('#notes-source');
+  await click('[role="option"]:last-child');
+  await expect.poll(() => evaluate<number>('document.querySelectorAll(".note-row").length')).toBe(1);
+  const savedScreenshot = await command<{ data: string }>('Page.captureScreenshot', { format: 'png' });
+  await writeFile('test-results/saved-notes.png', Buffer.from(savedScreenshot.data, 'base64'));
+  const downloads = await mkdtemp(path.join(tmpdir(), 'selio-export-'));
+  await cdp.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads });
+  await click('.notes-heading button');
+  await expect.poll(async () => (await readdir(downloads)).filter(name => name.endsWith('.md')).length).toBe(1);
+  const filename = (await readdir(downloads)).find(name => name.endsWith('.md'))!;
+  const markdown = await readFile(path.join(downloads, filename), 'utf8');
+  expect(markdown).toContain('A useful reading insight'); expect(markdown).toContain(origin + '/');
+  expect(markdown).toContain('熟悉的想法'); expect(markdown).toContain('Reading, AI');
+  await rm(downloads, { recursive: true, force: true });
+  await click('.note-row');
+  await expect.poll(() => evaluate<string>('document.querySelector(".note-detail").innerText')).toContain('Attention is the beginning');
+
+  await click('.note-detail > button.text-button:last-of-type');
+  await expect.poll(() => evaluate<boolean>('Boolean(document.querySelector(".note-editor"))')).toBe(true);
+  await click('.note-editor textarea');
+  await command('Input.insertText', { text: 'Edited: ' });
+  await click('.note-editor button[type="submit"]');
+  await expect.poll(() => evaluate<string>('document.querySelector(".note-content")?.textContent || ""')).toContain('Edited:');
+  const detailScreenshot = await command<{ data: string }>('Page.captureScreenshot', { format: 'png' });
+  await writeFile('test-results/saved-note-detail.png', Buffer.from(detailScreenshot.data, 'base64'));
+  await click('.panel-navigation button:first-child');
+  await expect.poll(async () => (await inspect()).draft).toBe('保留这个草稿');
+  expect(requests.length).toBe(count);
+
   await cdp.detach();
 });
 
@@ -584,6 +649,8 @@ test('saved API keys survive a complete browser restart', async () => {
   expect(JSON.stringify(stored.local)).toContain('mock-key-for-testing');
   expect(JSON.stringify(stored.local)).toContain('mock-anthropic-key');
   expect(JSON.stringify(stored.session)).not.toContain('mock-key-for-testing');
+  expect(stored.local.notes).toMatchObject([{ sourceUrl: origin + '/', tags: ['Reading', 'AI'] }]);
+  expect((stored.local.notes as { note: string }[])[0]!.note).toContain('Edited:');
 });
 
 test('Ask This Page extracts without selection, exposes request evidence and refreshes safely', async () => {

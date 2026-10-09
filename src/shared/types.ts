@@ -40,7 +40,12 @@ export interface ModelView extends ModelConfig { hasKey: boolean }
 export type PublicModel = Pick<ModelConfig, 'id' | 'name' | 'provider' | 'model'>;
 export interface Settings { actions: PromptAction[]; preferences: Preferences; models: ModelView[]; defaultModelId: string | null }
 export interface Rect { x: number; y: number; width: number; height: number }
-export interface SelectionSnapshot { text: string; paragraph?: string; rect: Rect; pageTitle: string }
+export interface SelectionSnapshot { text: string; paragraph?: string; rect: Rect; pageTitle: string; pageUrl?: string }
+export interface SavedNote {
+  id: string; conversationId: string; messageId: string;
+  selection: string; sourceUrl: string; sourceTitle: string; answer: string;
+  note: string; tags: string[]; createdAt: number; updatedAt: number;
+}
 export interface PageChunk { id: number; heading: string; text: string; start: number; end: number }
 export interface PageSnapshot {
   title: string; url: string; capturedAt: number; method: 'readability' | 'semantic';

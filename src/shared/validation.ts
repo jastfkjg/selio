@@ -1,6 +1,7 @@
 import { DEFAULT_PREFERENCES, LIMITS, type ModelConfig, type Preferences, type SelectionSnapshot } from './types';
 import { isActionId } from './actions';
 import { PROVIDER_IDS } from './providers';
+import { sourceUrl } from './notes';
 
 export const isAction = isActionId;
 export function apiEndpoint(baseUrl: string, provider: ModelConfig['provider'] = 'custom'): string {
@@ -48,7 +49,7 @@ export function sanitizeSnapshot(value: SelectionSnapshot): SelectionSnapshot {
   if (!text) throw new Error('选中文字为空。');
   const r = value.rect;
   const rect = r && [r.x, r.y, r.width, r.height].every(Number.isFinite) ? { x: r.x, y: r.y, width: Math.max(0, r.width), height: Math.max(0, r.height) } : { x: 20, y: 20, width: 0, height: 0 };
-  return { text, rect, pageTitle: typeof value.pageTitle === 'string' ? value.pageTitle.slice(0, 200) : '', ...(typeof value.paragraph === 'string' ? { paragraph: cleanText(value.paragraph, LIMITS.paragraph) } : {}) };
+  return { text, rect, pageTitle: typeof value.pageTitle === 'string' ? value.pageTitle.slice(0, 200) : '', ...(typeof value.pageUrl === 'string' ? { pageUrl: sourceUrl(value.pageUrl) } : {}), ...(typeof value.paragraph === 'string' ? { paragraph: cleanText(value.paragraph, LIMITS.paragraph) } : {}) };
 }
 export function siteDisabled(host: string, sites: string[]): boolean {
   return sites.some(s => host === s || host.endsWith(`.${s}`));

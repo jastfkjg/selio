@@ -1,5 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { useEffect, useRef, useState } from 'react';
+import { Bookmark, MessageSquare } from 'lucide-react';
+import { NotesList } from '../../src/components/NotesList';
 import { Chat } from '../../src/components/Chat';
 import { useChat } from '../../src/hooks/useChat';
 import { useTheme } from '../../src/hooks/useTheme';
@@ -30,6 +32,8 @@ function PanelChat({ tabId }: { tabId: number }) {
 function Panel() {
   const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES);
   const t = translator(preferences.uiLanguage);
+  const theme = useTheme(preferences.theme);
+  const [view, setView] = useState<'chat' | 'notes'>('chat');
   useEffect(() => {
     const refresh = () => { void rpc<Preferences>('public:preferences').then(setPreferences).catch(() => undefined); };
     const changed = (changes: Record<string, chrome.storage.StorageChange>, area: string) => { if (area === 'local' && changes.settings) refresh(); };
@@ -55,6 +59,10 @@ function Panel() {
     chrome.tabs.onActivated.addListener(activated);
     return () => { disposed = true; chrome.tabs.onActivated.removeListener(activated); };
   }, []);
-  return tabId !== null ? <PanelChat key={tabId} tabId={tabId}/> : <div className="chat-empty"><p>{t("请打开一个网页，开始阅读。")}</p></div>;
+  return <div className="selio-root panel-shell" data-theme={theme} lang={preferences.uiLanguage}>
+    <nav className="panel-navigation" aria-label={t('侧边栏导航')}><button aria-pressed={view === 'chat'} onClick={() => setView('chat')}><MessageSquare size={15}/>{t('阅读助手')}</button><button aria-pressed={view === 'notes'} onClick={() => setView('notes')}><Bookmark size={15}/>{t('收藏笔记')}</button></nav>
+    <div className="panel-chat-view" hidden={view !== 'chat'}>{tabId !== null ? <PanelChat key={tabId} tabId={tabId}/> : <div className="chat-empty"><p>{t("请打开一个网页，开始阅读。")}</p></div>}</div>
+    {view === 'notes' && <NotesList language={preferences.uiLanguage}/>}
+  </div>;
 }
 createRoot(document.getElementById('root')!).render(<Panel/>);

@@ -48,7 +48,8 @@ function App({ host }: { host: HTMLElement }) {
       const current = window.getSelection();
       if (current?.anchorNode && host.contains(current.anchorNode)) return;
       const saved = snapshotSelection(current, document.title);
-      if (saved && !(state.current.open && saved.snapshot.text === state.current.chat?.selection.text)) { range.current = saved.range; setSelection(saved.snapshot); }
+      if (saved) saved.snapshot.pageUrl = location.href;
+      if (saved && !(state.current.open && saved.snapshot.text === state.current.chat?.selection.text && saved.snapshot.pageUrl === state.current.chat?.selection.pageUrl)) { range.current = saved.range; setSelection(saved.snapshot); }
       else setSelection(null);
     };
     const changed = () => { cancelHover(); clearTimeout(debounce); debounce = setTimeout(detect, 160); };
@@ -130,7 +131,7 @@ function App({ host }: { host: HTMLElement }) {
     hoverOpened.current = hover;
     setPlacement(hover ? 'right-start' : 'bottom-end');
     if (hover) controls.current.manual.current = false;
-    if (session.conversation?.selection.text === selection.text) {
+    if (session.conversation?.selection.text === selection.text && session.conversation.selection.pageUrl === selection.pageUrl) {
       setOpen(true); setAnchor(selection); setSelection(null);
     } else start(selection, range.current);
   };

@@ -1,5 +1,6 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { ConversationEngine } from '../src/background/conversations';
+import { clearNotes, deleteNote, readNotes, saveAnswer, updateNote } from '../src/background/notes';
 import { deleteAction, saveAction, deleteModel, mutateSettings, protectStorage, readKey, readSaved, saveModel, savePreferences, setDefault, settingsView } from '../src/background/repository';
 import { translator } from '../src/shared/i18n';
 import { clearUsage, readUsage, recoverUsage, trackedStream } from '../src/background/usage';
@@ -158,7 +159,7 @@ export default defineBackground(() => {
     // Must run before any await to preserve Chrome's user activation.
     void chrome.sidePanel.open({ tabId: tab.id }).catch(() => undefined);
     const tabId = tab.id;
-    const selection: SelectionSnapshot = { text: info.selectionText.slice(0, 12000), rect: { x: 20, y: 20, width: 0, height: 0 }, pageTitle: tab.title ?? '' };
+    const selection: SelectionSnapshot = { text: info.selectionText.slice(0, 12000), rect: { x: 20, y: 20, width: 0, height: 0 }, pageTitle: tab.title ?? '', pageUrl: info.pageUrl ?? tab.url };
     void ready.then(async () => {
       const settings = await readSaved();
       engine.start(tabId, selection, { ...settings.preferences, scope: 'selection' }, settings.defaultModelId, engine.get(tabId)?.id, settings.actions.find(a => a.id === settings.preferences.action));
@@ -254,9 +255,21 @@ export default defineBackground(() => {
       await ready;
       if (message.type === 'public:preferences' && (content(sender) || trusted(sender))) return (await readSaved()).preferences;
       if (message.type === 'open:options' && (content(sender) || trusted(sender))) return chrome.runtime.openOptionsPage();
+      if (['notes:find', 'notes:save'].includes(message.type) && (content(sender) || trusted(sender, ['sidepanel.html']))) {
+        const p = message.payload;
+        const tabId = content(sender) ? sender.tab!.id! : p?.tabId;
+        const state = engine.get(tabId);
+        if (!state || state.id !== p?.conversationId || (content(sender) && state.page)) throw new Error('会话已切换，请在当前会话重试。');
+        if (!state.messages.some(item => item.id === p?.messageId && item.role === 'assistant')) throw new Error('回答已变化，请在当前回答重试。');
+        if (message.type === 'notes:find') return (await readNotes()).find(item => item.conversationId === state.id && item.messageId === p.messageId) ?? null;
+        return saveAnswer(state, p.messageId, p.note, p.tags);
+      }
       if (!trusted(sender)) throw new Error('此操作只能从 Selio 设置或扩展页面发起。');
       const p = message.payload;
       switch (message.type) {
+        case 'notes:list': return readNotes();
+        case 'notes:update': return updateNote(p?.id, p?.note, p?.tags);
+        case 'notes:delete': return deleteNote(p?.id);
         case 'page:load': {
           if (!trusted(sender, ['sidepanel.html']) || !Number.isInteger(p?.tabId)) throw new Error('标签页无效。');
           if (p.ensure && engine.get(p.tabId)) return;
@@ -340,6 +353,7 @@ export default defineBackground(() => {
           saveTimers.clear();
           await Promise.all(writeQueues.values());
           await clearUsage();
+          await clearNotes();
           await chrome.storage.local.clear(); await chrome.storage.session.clear();
           await chrome.storage.local.set({ keyStorageVersion: 2 });
           const permissions = await chrome.permissions.getAll();
