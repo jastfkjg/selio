@@ -5,7 +5,7 @@ import { deleteAction, saveAction, deleteModel, mutateSettings, protectStorage, 
 import { translator } from '../src/shared/i18n';
 import { clearUsage, readUsage, recoverUsage, trackedStream } from '../src/background/usage';
 import { ApiError, errorMessage } from '../src/llm/errors';
-import { isAction, originPattern, siteDisabled } from '../src/shared/validation';
+import { isAction, matchesSitePattern, originPattern, siteDisabled } from '../src/shared/validation';
 import { ALL_SITES } from '../src/shared/types';
 import type { ChatCommand, Conversation, PageSnapshot, SelectionSnapshot, ServerEvent } from '../src/shared/types';
 
@@ -90,6 +90,13 @@ export default defineBackground(() => {
       for (const tab of tabs) {
         if (tab.id === undefined) continue;
         void chrome.tabs.sendMessage(tab.id, { type: 'selio:preferences', preferences: saved.preferences }).catch(() => undefined);
+        // Registration covers future documents. Reconnect already-open, explicitly granted tabs too.
+        if (tab.url && matches.some(pattern => matchesSitePattern(pattern, tab.url!)) && !siteDisabled(new URL(tab.url).hostname, saved.preferences.disabledSites)) {
+          void chrome.tabs.sendMessage(tab.id, { type: 'selio:selection-ready' }, { frameId: 0 }).then(reply => {
+            if (reply !== true) throw new Error('No selection listener');
+          }).catch(() => chrome.scripting.executeScript({ target: { tabId: tab.id! }, files: ['content-scripts/content.js'] }))
+            .then(() => chrome.tabs.sendMessage(tab.id!, { type: 'selio:enabled' })).catch(() => undefined);
+        }
       }
     });
     syncQueue = next.catch(() => undefined);
@@ -118,21 +125,34 @@ export default defineBackground(() => {
     if (pending) return pending;
     const task = (async () => {
       await ready;
-      const tab = await chrome.tabs.get(tabId);
-      if (!tab.url) throw new Error('无法读取此网页。请点击浏览器工具栏的 Selio 图标授予当前页访问权限，或在设置中授权此网站。');
-      if (!/^https?:\/\//.test(tab.url)) throw new Error('此页面无法提取正文，请在普通文章或文档网页使用。');
-      const saved = await readSaved();
-      if (siteDisabled(new URL(tab.url).hostname, saved.preferences.disabledSites)) throw new Error('此网站已停用 Selio，请在网站权限中启用后重试。');
-      const current = engine.get(tabId);
-      if (reuse && current?.page?.url === tab.url && !current.page.stale) return;
       const version = navigationVersions.get(tabId) ?? 0;
-      try { await chrome.scripting.executeScript({ target: { tabId }, files: ['content-scripts/page-extractor.js'] }); }
-      catch { throw new Error('无法读取此网页。请点击浏览器工具栏的 Selio 图标授予当前页访问权限，或在设置中授权此网站。'); }
-      const result = await chrome.tabs.sendMessage(tabId, { type: 'selio:extract-page' }, { frameId: 0 }) as { page?: PageSnapshot; error?: string };
-      if (!result.page) throw new Error(result.error || '未能提取正文。');
-      const after = await chrome.tabs.get(tabId);
-      if ((navigationVersions.get(tabId) ?? 0) !== version || after.url !== result.page.url) throw new Error('网页已变化，请刷新正文后继续提问。');
-      engine.startPage(tabId, result.page, saved.preferences, current?.modelId ?? saved.defaultModelId, expectedId);
+      const current = engine.get(tabId);
+      if (reuse && current?.mode === 'general') return;
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab.url) throw new Error('无法读取此网页。请点击浏览器工具栏的 Selio 图标授予当前页访问权限，或在设置中授权此网站。');
+        if (!/^https?:\/\//.test(tab.url)) throw new Error('浏览器内部页和扩展页不支持读取正文，可关闭页面上下文后直接聊天。');
+        const saved = await readSaved();
+        if (siteDisabled(new URL(tab.url).hostname, saved.preferences.disabledSites)) throw new Error('此网站已停用 Selio，请在网站权限中启用后重试。');
+        if (reuse && current?.page?.url === tab.url && !current.page.stale) return;
+        try { await chrome.scripting.executeScript({ target: { tabId }, files: ['content-scripts/page-extractor.js'] }); }
+        catch { throw new Error('无法读取此网页。请点击浏览器工具栏的 Selio 图标授予当前页访问权限，或在设置中授权此网站。'); }
+        const result = await chrome.tabs.sendMessage(tabId, { type: 'selio:extract-page' }, { frameId: 0 }) as { page?: PageSnapshot; error?: string };
+        if (!result.page) throw new Error(result.error || '未能提取正文。');
+        const after = await chrome.tabs.get(tabId);
+        if ((navigationVersions.get(tabId) ?? 0) !== version || after.url !== result.page.url) throw new Error('网页已变化，请刷新正文后继续提问。');
+        engine.startPage(tabId, result.page, saved.preferences, current?.modelId ?? saved.defaultModelId, expectedId);
+      } catch (error) {
+        // Keep an existing conversation on refresh failure; a first visit can still chat without a page.
+        if (!engine.get(tabId) && (navigationVersions.get(tabId) ?? 0) === version) {
+          const saved = await readSaved();
+          if (!engine.get(tabId) && (navigationVersions.get(tabId) ?? 0) === version) {
+            engine.startChat(tabId, saved.preferences, saved.defaultModelId, undefined, error instanceof Error ? error.message : '未能提取正文。');
+            return;
+          }
+        }
+        throw error;
+      }
     })();
     pageLoads.set(tabId, task);
     void task.finally(() => { if (pageLoads.get(tabId) === task) pageLoads.delete(tabId); }).catch(() => undefined);
@@ -189,7 +209,7 @@ export default defineBackground(() => {
       const tabId = ports.get(port);
       if (tabId === undefined) return;
       const command = message as ChatCommand;
-      if (!trusted(port.sender ?? {}, ['sidepanel.html']) && engine.get(tabId)?.page && command.type !== 'start' && command.type !== 'stop') return;
+      if (!trusted(port.sender ?? {}, ['sidepanel.html']) && (engine.get(tabId)?.page || engine.get(tabId)?.mode === 'general') && command.type !== 'start' && command.type !== 'stop') return;
       const previous = tabQueues.get(tabId) ?? ready;
       const next = previous.then(async () => {
         if (command.type === 'ask' || command.type === 'retry') {
@@ -259,7 +279,7 @@ export default defineBackground(() => {
         const p = message.payload;
         const tabId = content(sender) ? sender.tab!.id! : p?.tabId;
         const state = engine.get(tabId);
-        if (!state || state.id !== p?.conversationId || (content(sender) && state.page)) throw new Error('会话已切换，请在当前会话重试。');
+        if (!state || state.id !== p?.conversationId || (content(sender) && (state.page || state.mode === 'general'))) throw new Error('会话已切换，请在当前会话重试。');
         if (!state.messages.some(item => item.id === p?.messageId && item.role === 'assistant')) throw new Error('回答已变化，请在当前回答重试。');
         if (message.type === 'notes:find') return (await readNotes()).find(item => item.conversationId === state.id && item.messageId === p.messageId) ?? null;
         return saveAnswer(state, p.messageId, p.note, p.tags);
@@ -267,6 +287,16 @@ export default defineBackground(() => {
       if (!trusted(sender)) throw new Error('此操作只能从 Selio 设置或扩展页面发起。');
       const p = message.payload;
       switch (message.type) {
+        case 'chat:general': {
+          if (!trusted(sender, ['sidepanel.html']) || !Number.isInteger(p?.tabId)) throw new Error('标签页无效。');
+          await chrome.tabs.get(p.tabId);
+          const saved = await readSaved();
+          const state = engine.get(p.tabId);
+          engine.startChat(p.tabId, saved.preferences, state?.modelId ?? saved.defaultModelId, p.conversationId);
+          navigationVersions.set(p.tabId, (navigationVersions.get(p.tabId) ?? 0) + 1);
+          pageLoads.delete(p.tabId);
+          return;
+        }
         case 'notes:list': return readNotes();
         case 'notes:update': return updateNote(p?.id, p?.note, p?.tags);
         case 'notes:delete': return deleteNote(p?.id);
@@ -377,7 +407,8 @@ export default defineBackground(() => {
   chrome.tabs.onUpdated.addListener((tabId, info) => {
     if (info.status === 'loading' || info.url) {
       navigationVersions.set(tabId, (navigationVersions.get(tabId) ?? 0) + 1);
-      engine.stop(tabId); engine.stalePage(tabId);
+      if (engine.get(tabId)?.mode !== 'general') engine.stop(tabId);
+      engine.stalePage(tabId);
     }
   });
 });

@@ -25,7 +25,7 @@ function App({ host }: { host: HTMLElement }) {
   const cancelHover = () => clearTimeout(hoverTimer.current);
   useEffect(() => () => clearTimeout(hoverTimer.current), [selection]);
   const [open, setOpen] = useState(false);
-  useEffect(() => { if (session.conversation?.page) setOpen(false); }, [session.conversation?.page]);
+  useEffect(() => { if (session.conversation?.page || session.conversation?.mode === 'general') setOpen(false); }, [session.conversation?.page, session.conversation?.mode]);
   const [access, setAccess] = useState(true);
   const accessRevoked = useRef(false);
   const previousAllSites = useRef(false);
@@ -66,6 +66,7 @@ function App({ host }: { host: HTMLElement }) {
       if (event.key === 'Escape' && state.current.chat?.status !== 'generating' && !state.current.chat?.draft) { setOpen(false); setSelection(null); }
     };
     const message = (message: { type: string; text?: string; origins?: string[] }, _sender: chrome.runtime.MessageSender, respond: (data: unknown) => void) => {
+      if (message.type === 'selio:selection-ready') respond(true);
       if (message.type === 'selio:revoked' && message.origins?.some(pattern => matchesSitePattern(pattern, location.href))) { accessRevoked.current = true; setAccess(false); setSelection(null); }
       if (message.type === 'selio:enabled') { accessRevoked.current = false; setAccess(true); }
       if (message.type === 'selio:paragraph') {
@@ -146,7 +147,11 @@ export default defineContentScript({
   // Declaring matches here would make WXT generate permanent host permissions.
   registration: 'runtime', cssInjectionMode: 'manual',
   main(ctx) {
-    if (document.querySelector('selio-assistant')) return;
+    const instance = globalThis as typeof globalThis & { __selioMounted?: boolean };
+    if (instance.__selioMounted) return;
+    instance.__selioMounted = true;
+    // An extension update can leave an old, disconnected host in the existing document.
+    document.querySelector('selio-assistant')?.remove();
     const host = document.createElement('selio-assistant');
     host.style.cssText = 'all:initial!important;position:fixed!important;inset:0!important;z-index:2147483647!important;pointer-events:none!important;';
     const shadow = host.attachShadow({ mode: 'open' });
@@ -154,6 +159,6 @@ export default defineContentScript({
     const container = document.createElement('div'); shadow.append(css, container);
     document.documentElement.append(host);
     const root = createRoot(container); root.render(<App host={host}/>);
-    ctx.onInvalidated(() => { root.unmount(); host.remove(); });
+    ctx.onInvalidated(() => { root.unmount(); host.remove(); instance.__selioMounted = false; });
   },
 });

@@ -50,11 +50,13 @@ export async function settingsView(): Promise<Settings> {
   return { ...saved, models: await Promise.all(saved.models.map(async model => ({ ...model, hasKey: Boolean(await readKey(model)) }))) };
 }
 let writes = Promise.resolve();
-export function mutateSettings(fn: (saved: Saved) => Promise<void>): Promise<void> {
+interface SettingsCommit { localValues?: Record<string, unknown>; afterCommit?: () => Promise<void> }
+export function mutateSettings(fn: (saved: Saved) => Promise<void | SettingsCommit>): Promise<void> {
   const operation = writes.then(async () => {
     const saved = await readSaved();
-    await fn(saved);
-    await chrome.storage.local.set({ settings: saved });
+    const commit = await fn(saved);
+    await chrome.storage.local.set({ ...commit?.localValues, settings: saved });
+    await commit?.afterCommit?.();
   });
   writes = operation.catch(() => undefined);
   return operation;
@@ -70,12 +72,17 @@ export async function saveModel(raw: ModelConfig, key?: string): Promise<void> {
     if (changedOrigin && !key?.trim()) throw new Error('API 来源已改变，请重新输入该来源的 API Key。');
     const secret = key?.trim() || (previous ? await readKey(previous) : '');
     if (!secret) throw new Error('请输入 API Key。默认保存在这台设备上。');
-    const storage = model.keyStorage === 'local' ? chrome.storage.local : chrome.storage.session;
+    const keyName = `key:${model.id}`;
+    // Persistent credentials and their metadata commit in the same local write.
+    // When moving to session storage, retain the local copy until metadata commits.
+    if (model.keyStorage === 'session') await chrome.storage.session.set({ [keyName]: secret });
     const other = model.keyStorage === 'local' ? chrome.storage.session : chrome.storage.local;
-    await storage.set({ [`key:${model.id}`]: secret });
-    await other.remove(`key:${model.id}`);
     saved.models = [...saved.models.filter(m => m.id !== model.id), model];
     saved.defaultModelId ??= model.id;
+    return {
+      localValues: model.keyStorage === 'local' ? { [keyName]: secret } : undefined,
+      afterCommit: () => other.remove(keyName),
+    };
   });
 }
 export const deleteModel = (id: string) => mutateSettings(async saved => {

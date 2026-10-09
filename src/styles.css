@@ -226,25 +226,41 @@ h1, h2, h3, p { margin: 0; } h1, h2, h3 { font-weight: 600; }
 .actions-layout:not(.is-editing) .action-setting-tools { grid-column: auto; gap: 16px; }
 @media (max-width: 680px) { .actions-layout:not(.is-editing) .action-setting { grid-template-columns: 34px minmax(0, 1fr); }.actions-layout:not(.is-editing) .action-setting-tools { grid-column: 2; } }
 
-/* Ask This Page shares the reading companion's typography and theme tokens. */
-.selio-root .page-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 18px; border-bottom: 1px solid var(--line); font-size: 11px; flex-shrink: 0; }
-.selio-root .page-tools .text-button { min-height: 36px; text-align: right; }
-.selio-root .page-source { padding: 14px 18px 10px; border-bottom: 1px solid var(--line); flex-shrink: 0; max-height: 35vh; overflow: auto; }
-.selio-root .page-source > strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 14px; line-height: 1.5; }
-.selio-root .page-url { display: block; margin: 4px 0 8px; font-size: 11px; opacity: .8; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.selio-root .page-context { margin: 8px 0; font-size: 12px; line-height: 1.6; }
-.selio-root .page-context summary { cursor: pointer; padding: 8px 0; overflow-wrap: anywhere; }
+/* Compact page chat: context stays available without competing with the question. */
+.selio-root .panel-chat-title { font-size: 14px; font-weight: 600; }
+.selio-root .page-chat .chat-header { padding: 12px 18px 8px; }
+.selio-root .page-chat .header-tools { gap: 4px; }
+.selio-root .page-loading { padding: 0 18px 8px; font-size: 12px; color: var(--muted); }
+.selio-root .page-source { padding: 0 18px 8px; flex-shrink: 0; max-height: 28vh; overflow-y: auto; }
+.selio-root .page-url { display: block; font-size: 11px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.selio-root .page-context { margin: 2px 0; font-size: 12px; line-height: 1.6; }
+.selio-root .page-context > summary { cursor: pointer; padding: 7px 0; color: var(--muted); overflow-wrap: anywhere; }
 .selio-root .page-context summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.selio-root .page-context-body { padding: 0 0 4px 10px; border-left: 2px solid var(--line); }
-.selio-root .page-context-body p { margin: 8px 0; }
+.selio-root .page-context-body { padding: 8px 10px; background: var(--soft); border-radius: 8px; }
+.selio-root .page-context-body > p { margin: 6px 0; color: var(--muted); }
+.selio-root .page-context-body > strong { display: block; overflow-wrap: anywhere; font-weight: 500; }
+.selio-root .page-passage summary { cursor: pointer; padding: 7px 0; overflow-wrap: anywhere; }
 .selio-root .page-passage pre { margin: 4px 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.7 ui-monospace, monospace; max-height: 220px; overflow: auto; }
-.selio-root .page-limit { font-size: 12px; font-weight: 600; line-height: 1.6; }
-.selio-root .page-suggestions { margin: auto 0; padding: 20px 0; }
-.selio-root .page-suggestions h2 { font-size: 20px; font-weight: 500; margin: 0 0 12px; }
-.selio-root .page-suggestions p { font-size: 13px; line-height: 1.8; margin-bottom: 24px; }
-.selio-root .page-suggestions .button { display: flex; justify-content: space-between; width: 100%; min-height: 44px; text-align: left; white-space: normal; margin: 10px 0; padding: 12px; gap: 12px; }
-.selio-root .page-suggestions svg { flex-shrink: 0; }
-.selio-root .page-empty h2 { font-size: 27px; }
+.selio-root .page-limit { font-size: 12px; font-weight: 500; line-height: 1.6; margin-bottom: 6px; }
+.selio-root .page-suggestions { padding: clamp(24px, 6vh, 56px) 0 20px; }
+.selio-root .page-suggestions h2 { font-size: 20px; font-weight: 500; margin: 0 0 22px; letter-spacing: -.4px; }
+.selio-root .page-question { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 44px; text-align: left; font-size: 13px; padding: 10px 0; color: var(--muted); border-radius: 0; }
+.selio-root .page-question:hover:not(:disabled) { color: var(--accent); }
+.selio-root .page-question svg { opacity: .6; }
+.selio-root .page-chat .chat-footer { justify-content: center; padding: 8px 18px; }
+.selio-root .page-chat .composer { margin-top: 8px; }
+.selio-root .page-context-controls { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; padding: 4px 18px 8px; }
+.selio-root .page-context-toggle { display: flex; align-items: center; gap: 8px; min-height: 32px; font-size: 12px; color: var(--muted); }
+.selio-root .page-context-toggle[aria-checked="true"] { color: var(--accent); }
+.selio-root .toggle-track { width: 26px; height: 16px; border-radius: 20px; background: var(--line); padding: 3px; }
+.selio-root .toggle-track i { display: block; width: 10px; height: 10px; border-radius: 50%; background: var(--bg); }
+.selio-root .page-context-toggle[aria-checked="true"] .toggle-track { background: var(--accent); }
+.selio-root .page-context-toggle[aria-checked="true"] .toggle-track i { transform: translateX(10px); background: #fff; }
+.selio-root .page-context-controls small { font-size: 10px; color: var(--muted); }
+.selio-root .selection-access { font-size: 11px; }
+.selio-root .general-chat-hint { font-size: 13px; line-height: 1.7; color: var(--muted); }
+.selio-root .page-unavailable { margin: 0 18px 8px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.selio-root .page-unavailable summary { padding: 6px 0; cursor: pointer; }
 
 /* Saved answers share the chat's local-first reading surface. */
 .answer-actions { display: grid; grid-template-columns: auto 1fr; align-items: start; column-gap: 16px; }
@@ -258,9 +274,9 @@ h1, h2, h3, p { margin: 0; } h1, h2, h3 { font-weight: 600; }
 .note-editor-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .note-error { color: var(--danger); font-size: 12px; margin: 10px 0; overflow-wrap: anywhere; }
 .panel-shell { height: 100dvh; display: flex; flex-direction: column; background: var(--surface); }
-.panel-navigation { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--line); gap: 4px; padding: 8px 14px; }
-.panel-navigation button { display: flex; align-items: center; justify-content: center; gap: 7px; flex: 1; padding: 9px; font-size: 12px; color: var(--muted); }
-.panel-navigation button[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.panel-navigation { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--line); gap: 20px; padding: 0 18px; }
+.panel-navigation button { display: flex; align-items: center; justify-content: center; gap: 7px; padding: 12px 0; border-radius: 0; border-bottom: 2px solid transparent; font-size: 12px; color: var(--muted); }
+.panel-navigation button[aria-pressed="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 .panel-chat-view { flex: 1; min-height: 0; }
 .panel-chat-view > .selio-root, .panel-chat-view .chat-panel { height: 100%; }
 .panel-chat-view[hidden] { display: none; }

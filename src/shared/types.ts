@@ -49,12 +49,15 @@ export interface SavedNote {
 export interface PageChunk { id: number; heading: string; text: string; start: number; end: number }
 export interface PageSnapshot {
   title: string; url: string; capturedAt: number; method: 'readability' | 'semantic';
+  coverage?: 'discussion' | 'limited';
   chunks: PageChunk[]; totalCharacters: number; truncated: boolean; stale?: boolean;
 }
 export interface PageContext { mode: 'full' | 'retrieval' | 'overview'; chunkIds: number[]; characters: number }
 export interface Message { pageContext?: PageContext; id: string; role: 'user' | 'assistant'; content: string; stopped?: boolean }
 export type ConversationBranch = Pick<Conversation, 'messages' | 'draft' | 'status' | 'error' | 'modelId' | 'modelName' | 'selection' | 'template' | 'prompt' | 'promptDraft' | 'editingStatus'>;
 export interface Conversation {
+  mode?: 'general';
+  pageError?: string;
   page?: PageSnapshot;
   pageContext?: PageContext;
   template?: PromptAction;

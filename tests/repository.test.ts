@@ -94,3 +94,28 @@ it('migrates actions, persists per-template controls, and repairs references aft
   await expect(recovered.saveAction({ ...action, modelId: 'missing' })).rejects.toThrow('模型配置不存在');
   await expect(recovered.savePreferences({ ...initial.preferences, action: 'custom:missing' })).rejects.toThrow('操作模板不存在');
 });
+
+it.each(['local', 'session'] as const)('keeps the previous key readable if a move to %s fails before metadata commits', async target => {
+  const repo = await import('../src/background/repository');
+  const previous = { ...config, keyStorage: target === 'local' ? 'session' as const : 'local' as const };
+  await repo.saveModel(previous, 'EXISTING');
+  local.set.mockRejectedValueOnce(new Error('write interrupted'));
+  await expect(repo.saveModel({ ...config, keyStorage: target })).rejects.toThrow('write interrupted');
+  vi.resetModules();
+  const recovered = await import('../src/background/repository');
+  const view = await recovered.settingsView();
+  expect(view.models[0]).toMatchObject({ keyStorage: previous.keyStorage, hasKey: true });
+  expect(await recovered.readKey(view.models[0]!)).toBe('EXISTING');
+  await recovered.saveModel({ ...config, keyStorage: target });
+  expect((await recovered.settingsView()).models[0]).toMatchObject({ keyStorage: target, hasKey: true });
+});
+it('commits a persistent key with its model metadata and preserves it when the form submits a blank key', async () => {
+  const repo = await import('../src/background/repository');
+  await repo.saveModel({ ...config, keyStorage: 'local' }, 'PERSISTENT');
+  const commit = local.set.mock.calls.find(([values]) => values.settings && values['key:model'] === 'PERSISTENT');
+  expect(commit).toBeDefined();
+  await repo.saveModel({ ...config, name: 'Renamed', keyStorage: 'local' }, '');
+  session = area(); vi.stubGlobal('chrome', { storage: { local, session } }); vi.resetModules();
+  const recovered = await import('../src/background/repository');
+  expect((await recovered.settingsView()).models[0]).toMatchObject({ name: 'Renamed', keyStorage: 'local', hasKey: true });
+});

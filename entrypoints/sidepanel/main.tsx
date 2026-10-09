@@ -9,11 +9,26 @@ import '../../src/styles.css';
 import { translator } from '../../src/shared/i18n';
 import { usePageLanguage } from '../../src/hooks/useLanguage';
 import { rpc } from '../../src/shared/rpc';
+import { matchesSitePattern, originPattern, siteDisabled } from '../../src/shared/validation';
 import { DEFAULT_PREFERENCES, type Preferences } from '../../src/shared/types';
 function PanelChat({ tabId }: { tabId: number }) {
   const session = useChat(tabId);
   const [loading, setLoading] = useState(false);
   const attempted = useRef(false);
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    let disposed = false;
+    const refresh = () => { void chrome.tabs.get(tabId).then(tab => { if (!disposed) setUrl(tab.url ?? ''); }).catch(() => undefined); };
+    const changed = (id: number) => { if (id === tabId) refresh(); };
+    refresh(); chrome.tabs.onUpdated.addListener(changed);
+    return () => { disposed = true; chrome.tabs.onUpdated.removeListener(changed); };
+  }, [tabId, loading]);
+  const general = async () => {
+    setLoading(true); session.setError('');
+    try { await rpc('chat:general', { tabId, conversationId: session.conversation?.id }); }
+    catch (error) { session.setError(error instanceof Error ? error.message : '操作未完成，请重试。'); }
+    finally { setLoading(false); }
+  };
   const load = async (ensure = false) => {
     setLoading(true); session.setError('');
     try { await rpc('page:load', { tabId, conversationId: session.conversation?.id, ensure }); }
@@ -26,8 +41,17 @@ function PanelChat({ tabId }: { tabId: number }) {
     if (!session.conversation) void load(true);
   });
   const theme = useTheme(session.preferences.theme);
+  const canGrant = /^https?:/.test(url) && session.preferences.autoSelection && !session.preferences.allSites
+    && !session.preferences.grantedSites.some(pattern => matchesSitePattern(pattern, url))
+    && !siteDisabled(new URL(url).hostname, session.preferences.disabledSites);
+  const grant = () => {
+    // Request inside the button gesture; do not wait for a background lookup first.
+    void chrome.permissions.request({ origins: [originPattern(url)] }).then(async allowed => {
+      if (allowed) await rpc('site:add', url);
+    }).catch(error => session.setError(error.message));
+  };
   usePageLanguage(session.preferences.uiLanguage, translator(session.preferences.uiLanguage)('阅读助手'));
-  return <div className="selio-root" data-theme={theme}><Chat panel session={session} pageTools={{ loading, onLoad: () => void load() }}/></div>;
+  return <div className="selio-root" data-theme={theme}><Chat panel session={session} pageTools={{ loading, onLoad: () => session.conversation?.mode === 'general' ? void general() : void load(), onToggle: () => session.conversation?.page ? void general() : void load(), onGrant: canGrant ? grant : undefined }}/></div>;
 }
 function Panel() {
   const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES);

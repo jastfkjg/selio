@@ -57,7 +57,22 @@ export class ConversationEngine {
     const state: Conversation = {
       id: crypto.randomUUID(), tabId, page, action: 'summarize', scope: 'selection',
       selection: { text: '', pageTitle: page.title, rect: { x: 0, y: 0, width: 0, height: 0 } },
-      language: preferences.language, modelId, modelName: '未配置模型', messages: [], draft: '', status: 'idle', updatedAt: Date.now(),
+      language: preferences.language, modelId, modelName: '未配置模型', messages: [], draft: existing?.mode === 'general' ? existing.draft : '', status: 'idle', updatedAt: Date.now(),
+    };
+    this.states.set(tabId, state); this.emit(state);
+    return state;
+  }
+  startChat(tabId: number, preferences: Preferences, modelId: string | null, expectedId?: string, pageError?: string) {
+    const existing = this.get(tabId);
+    if (existing && existing.id !== expectedId) throw new Error('会话已切换，请在当前会话重试。');
+    this.stop(tabId);
+    // A new context boundary also drops page-derived answers from outgoing history.
+    const state: Conversation = {
+      id: crypto.randomUUID(), tabId, mode: 'general', action: 'summarize', scope: 'selection',
+      selection: { text: '', pageTitle: '', rect: { x: 0, y: 0, width: 0, height: 0 } },
+      language: preferences.language, modelId, modelName: '未配置模型', messages: [],
+      draft: existing?.draft ?? '', status: 'idle', updatedAt: Date.now(),
+      ...(pageError ? { pageError } : {}),
     };
     this.states.set(tabId, state); this.emit(state);
     return state;
@@ -83,7 +98,7 @@ export class ConversationEngine {
   retry(tabId: number, id: string | undefined) {
     const state = this.require(tabId, id);
     if (state.page?.stale) throw new Error('网页已变化，请刷新正文后继续提问。');
-    if (state.page && !state.messages.some(m => m.role === 'user')) return;
+    if ((state.page || state.mode === 'general') && !state.messages.some(m => m.role === 'user')) return;
     if (state.status === 'editing') throw new Error('请先执行或取消 Prompt 编辑。');
     this.stop(tabId);
     if (state.messages.at(-1)?.role === 'assistant') state.messages.pop();
@@ -91,7 +106,7 @@ export class ConversationEngine {
   }
   change(tabId: number, id: string | undefined, action?: Action, scope?: Scope, paragraph?: string, template?: PromptAction) {
     const state = this.require(tabId, id);
-    if (state.page) throw new Error('网页问答不支持划词操作。');
+    if (state.page || state.mode === 'general') throw new Error('网页问答不支持划词操作。');
     const nextAction = action ?? state.action;
     const sameAction = nextAction === state.action;
     const wasEditing = state.status === 'editing';
@@ -131,7 +146,7 @@ export class ConversationEngine {
   }
   editPrompt(tabId: number, id: string | undefined) {
     const state = this.require(tabId, id);
-    if (state.page) throw new Error('网页问答不支持划词操作。');
+    if (state.page || state.mode === 'general') throw new Error('网页问答不支持划词操作。');
     if (state.status === 'generating') throw new Error('请先停止当前生成。');
     if (state.status === 'editing') return;
     state.editingStatus = state.status;
@@ -205,7 +220,7 @@ export class ConversationEngine {
   private async run(state: Conversation, requestId: string, messages: ApiMessage[], controller: AbortController) {
     const current = () => this.get(state.tabId)?.id === state.id && state.requestId === requestId && !controller.signal.aborted;
     try {
-      const generation = await this.dependencies.generate(state.modelId, state.action, state.page ? 'Ask This Page' : state.template?.name);
+      const generation = await this.dependencies.generate(state.modelId, state.action, state.mode === 'general' ? 'AI Chat' : state.page ? 'Ask This Page' : state.template?.name);
       if (!current()) return;
       state.modelId = generation.modelId;
       state.modelName = generation.modelName;

@@ -47,7 +47,7 @@ test.beforeAll(async () => {
         }, slow ? 1800 : 160);
         res.on('close', () => clearInterval(interval));
       });
-    } else { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(article); }
+    } else { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(req.url === '/empty' ? '<!doctype html><html><head><title>Canvas page</title></head><body><canvas></canvas></body></html>' : article); }
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('Mock server did not start');
@@ -633,6 +633,46 @@ test('one all-sites grant enables another host and revocation removes automatic 
   await other.close();
 });
 
+test('saved API keys survive an extension reload without reconfiguration', async () => {
+  const expected = await worker.evaluate(async () => ((await chrome.storage.local.get('settings')).settings as { models: { keyStorage: string }[] }).models.map(model => ({ keyStorage: model.keyStorage, hasKey: true })));
+  const manager = await context.newPage();
+  await manager.goto('chrome://extensions');
+  await manager.evaluate(async ({ id, host }) => {
+    await (chrome as unknown as { developerPrivate: { addHostPermission: (id: string, host: string) => Promise<void> } }).developerPrivate.addHostPermission(id, host);
+  }, { id: extensionId, host: `${origin}/*` });
+  await settings.getByRole('button', { name: 'Privacy & access' }).click();
+  await settings.getByLabel('Website address').fill(origin);
+  await settings.getByRole('button', { name: 'Allow website', exact: true }).click();
+  const openArticle = await context.newPage();
+  await openArticle.goto(origin + '/already-open');
+  await expect(openArticle.locator('selio-assistant')).toHaveCount(1);
+  await manager.evaluate(async id => {
+    const api = (chrome as unknown as { developerPrivate: {
+      updateProfileConfiguration: (update: { inDeveloperMode: boolean }) => Promise<void>;
+      reload: (id: string, options: { failQuietly: boolean }) => Promise<void>;
+    } }).developerPrivate;
+    await api.updateProfileConfiguration({ inDeveloperMode: true });
+    await api.reload(id, { failQuietly: true });
+  }, extensionId);
+  const check = await context.newPage();
+  await check.goto(`chrome-extension://${extensionId}/options.html`);
+  worker = context.serviceWorkers().find(w => w.url().includes(extensionId)) ?? await context.waitForEvent('serviceworker');
+  await manager.close();
+  await expect(check.getByText('Key saved on device', { exact: false })).toHaveCount(expected.length);
+  const view = await check.evaluate(async () => {
+    const response = await chrome.runtime.sendMessage({ type: 'settings:get' });
+    return response.data.models.map((model: { hasKey: boolean; keyStorage: string }) => ({ hasKey: model.hasKey, keyStorage: model.keyStorage }));
+  });
+  expect(view).toEqual(expected);
+  // Existing documents must get a live listener after update, without a toolbar click or page reload.
+  await openArticle.bringToFront();
+  await openArticle.locator('#source').selectText();
+  await expect(openArticle.getByRole('button', { name: 'Read selected text with Selio', exact: true })).toBeVisible();
+  expect(await openArticle.locator('selio-assistant').count()).toBe(1);
+  await openArticle.close();
+  settings = check;
+});
+
 test('saved API keys survive a complete browser restart', async () => {
   await context.close();
   const extension = path.resolve('.output/chrome-mv3');
@@ -697,16 +737,18 @@ test('Ask This Page extracts without selection, exposes request evidence and ref
   const evaluate = async <T,>(expression: string) => (await command<{ result: { value: T } }>('Runtime.evaluate', { expression, returnByValue: true })).result.value;
   const text = () => evaluate<string>('document.body.innerText');
   const click = async (label: string, tag = 'button') => {
-    await expect.poll(() => evaluate<boolean>(`(() => { const el = [...document.querySelectorAll(${JSON.stringify(tag)})].find(el => el.textContent.includes(${JSON.stringify(label)}) || el.getAttribute('aria-label') === ${JSON.stringify(label)}); return Boolean(el && !el.disabled); })()`)).toBe(true);
-    const point = await evaluate<{ x: number; y: number }>(`(() => { const el = [...document.querySelectorAll(${JSON.stringify(tag)})].find(el => el.textContent.includes(${JSON.stringify(label)}) || el.getAttribute('aria-label') === ${JSON.stringify(label)}); el.scrollIntoView({block:'center'}); const r = el.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
+    await expect.poll(() => evaluate<boolean>(`(() => { const el = [...document.querySelectorAll(${JSON.stringify(tag)})].find(el => el.textContent.includes(${JSON.stringify(label)}) || el.getAttribute('aria-label')?.includes(${JSON.stringify(label)})); return Boolean(el && !el.disabled); })()`)).toBe(true);
+    const point = await evaluate<{ x: number; y: number }>(`(() => { const el = [...document.querySelectorAll(${JSON.stringify(tag)})].find(el => el.textContent.includes(${JSON.stringify(label)}) || el.getAttribute('aria-label')?.includes(${JSON.stringify(label)})); el.scrollIntoView({block:'center'}); const r = el.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
     await command('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point });
     await command('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
   };
   await expect.poll(text).toContain('What would you like to know?');
   expect(requests.length).toBe(before);
+  expect(await evaluate<number>('document.querySelectorAll(".page-tools, .page-chat .brand, .page-chat .response-tools").length')).toBe(0);
+  expect(await evaluate<boolean>('document.querySelector(".page-context").open')).toBe(false);
   await command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await click('Inspect extracted content', 'summary');
-  await expect.poll(text).toContain('Extracted locally. Selected passages');
+  await expect.poll(text).toContain('Text is sent when you ask.');
   await click('Inspect extracted content', 'summary');
   await writeFile('test-results/ask-page-ready.png', Buffer.from((await command<{ data: string }>('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
   await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
@@ -764,5 +806,35 @@ test('Ask This Page extracts without selection, exposes request evidence and ref
   await expect.poll(() => evaluate<string>('document.querySelector(".selio-root")?.getAttribute("data-theme")')).toBe('dark');
   await expect.poll(text).toContain('Relevant excerpts');
   await writeFile('test-results/ask-page-dark.png', Buffer.from((await command<{ data: string }>('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+  await click('Use current page');
+  await expect.poll(text).toContain('How can I help?');
+  expect(await evaluate<boolean>('document.querySelector("[role=switch]").getAttribute("aria-checked") === "false"')).toBe(true);
+  expect(await evaluate<number>('document.querySelectorAll(".page-context, .action-toolbar, .message").length')).toBe(0);
+  await writeFile('test-results/general-chat-dark.png', Buffer.from((await command<{ data: string }>('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+  await click('', 'textarea');
+  await command('Input.insertText', { text: 'hi' });
+  await click('Send question');
+  await expect.poll(() => requests.length).toBe(before + 3);
+  await expect.poll(text).toContain('Complete');
+  expect(requests.at(-1)!.messages).toHaveLength(2);
+  expect(requests.at(-1)!.messages[1]).toEqual({ role: 'user', content: 'hi' });
+  expect(JSON.stringify(requests.at(-1))).not.toContain('inverted index');
+  expect(JSON.stringify(requests.at(-1))).not.toContain('passages');
+  await click('Use current page');
+  await expect.poll(text).toContain('What would you like to know?');
+  expect(await evaluate<boolean>('document.querySelector("[role=switch]").getAttribute("aria-checked") === "true"')).toBe(true);
+  expect(requests.length).toBe(before + 3);
+  // A fresh tab without readable content still gets a usable general AI composer.
+  const unavailable = await context.newPage();
+  await unavailable.goto(origin + '/empty');
+  await unavailable.bringToFront();
+  await expect.poll(text).toContain('Page unavailable');
+  expect(await evaluate<boolean>('document.querySelector("textarea").disabled')).toBe(false);
+  await click('', 'textarea');
+  await command('Input.insertText', { text: 'Say hello' });
+  await click('Send question');
+  await expect.poll(() => requests.length).toBe(before + 4);
+  expect(requests.at(-1)!.messages[1]).toEqual({ role: 'user', content: 'Say hello' });
+  await unavailable.close();
   await cdp.detach(); await popup.close(); await page.close();
 });

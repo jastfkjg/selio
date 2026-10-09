@@ -4,25 +4,46 @@ import { chunkPage } from './context';
 
 /** Work on an inert clone. Never read input values, shadow roots or child frames. */
 export function extractPage(doc: Document): PageSnapshot {
-  if (!/^https?:/.test(doc.location?.href ?? '') || doc.contentType === 'application/pdf') throw new Error('此页面无法提取正文，请在普通文章或文档网页使用。');
+  if (!/^https?:/.test(doc.location?.href ?? '')) throw new Error('浏览器内部页和扩展页不支持读取正文，可关闭页面上下文后直接聊天。');
+  if (doc.contentType === 'application/pdf') throw new Error('暂不支持读取 PDF 正文，可关闭页面上下文后直接聊天。');
   const originals = Array.from(doc.querySelectorAll('*'));
   if (originals.length > 40000) throw new Error('页面结构过于复杂，请打开文章的独立页面后重试。');
   const clone = doc.cloneNode(true) as Document;
   const copies = Array.from(clone.querySelectorAll('*'));
+  const discussion = Boolean(doc.querySelector('shreddit-post,shreddit-comment,.commentarea .comment'));
   const excluded = 'script,style,noscript,template,nav,footer,aside,form,input,textarea,select,button,iframe,canvas,svg,selio-assistant,[contenteditable]:not([contenteditable="false"]),[hidden],[aria-hidden="true"],[role="navigation"],[role="banner"],[role="dialog"],[role="complementary"],[role="contentinfo"],dialog';
   originals.forEach((node, index) => {
     const copy = copies[index];
     if (!copy?.parentNode) return;
     const style = doc.defaultView?.getComputedStyle(node);
-    const noise = /(?:^|[\s_-])(advertisement|advert|ad|ads|cookie|consent|share|sharing|social|related|recommendations|sidebar|comments?)(?:$|[\s_-])/i.test(`${node.id} ${node.getAttribute('class') ?? ''}`);
+    const identity = `${node.id} ${node.getAttribute('class') ?? ''}`;
+    const noise = /(?:^|[\s_-])(advertisement|advert|ad|ads|cookie|consent|share|sharing|social|related|recommendations|sidebar)(?:$|[\s_-])/i.test(identity)
+      || (!discussion && /(?:^|[\s_-])comments?(?:$|[\s_-])/i.test(identity));
     if (node.matches(excluded) || noise || style?.display === 'none' || (style?.visibility === 'hidden' || style?.visibility === 'collapse') || style?.opacity === '0') copy.remove();
   });
   let root: Element | null = null;
   let method: PageSnapshot['method'] = 'readability';
+  let coverage: PageSnapshot['coverage'];
   // Preserve documentation structure (code and tables), which article heuristics can discard.
   const semantic = Array.from(clone.querySelectorAll('article,main,[role="main"]')).sort((a, b) => (b.textContent?.length ?? 0) - (a.textContent?.length ?? 0))[0];
   const readable = new Readability(clone.cloneNode(true) as Document, { charThreshold: 120, maxElemsToParse: 40000, serializer: node => node as Element }).parse();
-  if (semantic && semantic.querySelector('pre,table') && (semantic.textContent?.trim().length ?? 0) >= 120) {
+  if (discussion) {
+    // Collect post/comment bodies explicitly, not the forum's controls, feed or entire DOM.
+    const bodies = Array.from(clone.querySelectorAll('shreddit-post [slot="title"],shreddit-post [slot="text-body"],shreddit-comment [slot="comment"],.thing.link .title,.thing.link .usertext-body,.commentarea .comment .usertext-body'));
+    const selected = new Set(bodies);
+    root = clone.createElement('article');
+    const title = clone.createElement('h1'); title.textContent = clone.querySelector('h1')?.textContent ?? doc.title; root.append(title);
+    for (const body of bodies) {
+      let parent = body.parentElement;
+      while (parent && !selected.has(parent)) parent = parent.parentElement;
+      if (parent) continue;
+      const section = clone.createElement('section');
+      const heading = clone.createElement('h2');
+      heading.textContent = body.closest('shreddit-comment,.comment') ? 'Comment' : 'Post';
+      section.append(heading, body.cloneNode(true)); root.append(section);
+    }
+    method = 'semantic'; coverage = bodies.length ? 'discussion' : 'limited';
+  } else if (semantic && (semantic.querySelector('pre,table') || (readable?.textContent?.trim().length ?? 0) < 80) && (semantic.textContent?.trim().length ?? 0) >= 120) {
     root = semantic; method = 'semantic';
   } else if (readable?.content) {
     root = readable.content;
@@ -46,8 +67,10 @@ export function extractPage(doc: Document): PageSnapshot {
   const fullText = blocks.join('').replace(/\n{3,}/g, '\n\n').trim();
   if (fullText.length < 80) throw new Error('正文内容太少，无法可靠回答。请等待加载或换一个文章页面。');
   const text = fullText.slice(0, 180000);
+  if (fullText.length < 200) coverage = 'limited';
   return {
     title: (readable?.title || doc.title).slice(0, 300), url: doc.location.href, capturedAt: Date.now(), method,
+    ...(coverage ? { coverage } : {}),
     totalCharacters: fullText.length, truncated: fullText.length > text.length, chunks: chunkPage(text),
   };
 }
