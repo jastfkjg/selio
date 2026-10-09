@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ConversationEngine } from '../src/background/conversations';
 import { DEFAULT_PREFERENCES, type ApiMessage, type Conversation } from '../src/shared/types';
 import { ApiError } from '../src/llm/errors';
+import { builtinAction } from '../src/shared/actions';
 const selection = { text: 'source', pageTitle: 'page', rect: { x: 0, y: 0, width: 2, height: 1 } };
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 function setup(stream: (messages: ApiMessage[], signal: AbortSignal) => AsyncIterable<string>) {
@@ -173,4 +174,66 @@ it('changing scope while editing never runs the prompt or resets the selected mo
   engine.change(1, state.id, undefined, 'paragraph', 'surrounding paragraph'); await tick();
   expect(calls).toBe(1); expect(state.status).toBe('editing'); expect(state.promptDraft).toBe('Edited {{selection}}'); expect(state.modelId).toBe('other');
   engine.execute(1, state.id, state.promptDraft!); await tick(); expect(calls).toBe(2);
+});
+
+it('Ask AI makes no generation request until a nonempty question is sent', async () => {
+  const requests: ApiMessage[][] = [];
+  const generate = vi.fn(async () => ({ modelId: 'other', modelName: 'Other', stream: async function* (messages: ApiMessage[]) { requests.push(messages); yield 'answer'; } }));
+  const engine = new ConversationEngine({ publish: () => {}, generate });
+  // Even an invalid immediate-execution template cannot bypass the Ask AI boundary.
+  const state = engine.start(1, selection, { ...DEFAULT_PREFERENCES, action: 'ask' }, null, undefined, { ...builtinAction('ask')!, execution: 'direct' });
+  await tick();
+  expect(state).toMatchObject({ status: 'idle', messages: [] });
+  engine.retry(1, state.id);
+  engine.draft(1, state.id, 'unsent draft');
+  engine.model(1, state.id, 'other', 'Other');
+  engine.change(1, state.id, undefined, 'paragraph', 'surrounding context');
+  engine.retry(1, state.id);
+  expect(() => engine.ask(1, state.id, '   ')).toThrow('请输入问题');
+  expect(() => engine.editPrompt(1, state.id)).toThrow('发送消息');
+  expect(() => engine.execute(1, state.id, 'Run {{selection}}')).toThrow('发送消息');
+  await tick();
+  expect(generate).not.toHaveBeenCalled();
+  expect(state.status).toBe('idle');
+  engine.ask(1, state.id, 'What does this mean?'); await tick();
+  expect(generate).toHaveBeenCalledTimes(1);
+  expect(generate).toHaveBeenCalledWith('other', 'ask', '询问 AI');
+  expect(requests[0]?.map(message => message.role)).toEqual(['system', 'user', 'user']);
+  expect(JSON.parse(requests[0]![1]!.content)).toEqual({ selected_text: selection.text, surrounding_paragraph: 'surrounding context' });
+  expect(requests[0]?.at(-1)?.content).toBe('What does this mean?');
+  expect(state.messages.map(message => message.role)).toEqual(['user', 'assistant']);
+  expect(state.draft).toBe('');
+  engine.ask(1, state.id, 'Give an example'); await tick();
+  expect(requests[1]?.map(message => message.role)).toEqual(['system', 'user', 'user', 'assistant', 'user']);
+  engine.retry(1, state.id); await tick();
+  expect(generate).toHaveBeenCalledTimes(3);
+  expect(state.messages.filter(message => message.role === 'user')).toHaveLength(2);
+});
+
+it('switching to Ask AI and changing its prompt stays idle while preserving cached questions and drafts', async () => {
+  const generate = vi.fn(async () => ({ modelId: 'model', modelName: 'Mock', stream: async function* () { yield 'answer'; } }));
+  const engine = new ConversationEngine({ publish: () => {}, generate });
+  const state = engine.start(1, selection, DEFAULT_PREFERENCES, 'model'); await tick();
+  engine.change(1, state.id, 'ask'); await tick();
+  expect(generate).toHaveBeenCalledTimes(1);
+  expect(state).toMatchObject({ status: 'idle', messages: [] });
+  engine.ask(1, state.id, 'My question'); await tick();
+  engine.draft(1, state.id, 'My draft');
+  const messages = structuredClone(state.messages);
+  engine.change(1, state.id, 'translate');
+  engine.change(1, state.id, 'ask'); await tick();
+  expect(generate).toHaveBeenCalledTimes(2);
+  expect(state.messages).toEqual(messages);
+  expect(state.draft).toBe('My draft');
+  const recovered = new ConversationEngine({ publish: () => {}, generate });
+  recovered.restore(structuredClone(state));
+  recovered.change(1, state.id, 'translate');
+  recovered.change(1, state.id, 'ask'); await tick();
+  expect(generate).toHaveBeenCalledTimes(2);
+  expect(recovered.get(1)?.draft).toBe('My draft');
+  engine.change(1, state.id, 'translate');
+  engine.change(1, state.id, 'ask', undefined, undefined, { ...builtinAction('ask')!, prompt: 'Use this context to answer the question: {{selection}}' });
+  await tick();
+  expect(generate).toHaveBeenCalledTimes(2);
+  expect(state).toMatchObject({ status: 'idle', messages: [], prompt: 'Use this context to answer the question: {{selection}}' });
 });

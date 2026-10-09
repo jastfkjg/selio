@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import type { ModelConfig } from '../src/shared/types';
+import { DEFAULT_PREFERENCES, type ModelConfig } from '../src/shared/types';
+import { DEFAULT_ACTIONS } from '../src/shared/actions';
 const config: ModelConfig = { id: 'model', name: 'Model', provider: 'custom', baseUrl: 'https://example.com/v1', model: 'model', keyStorage: 'session', maxTokens: 2048 };
 function area() {
   const data: Record<string, unknown> = {};
@@ -79,7 +80,7 @@ it('updates expired legacy key settings without inventing a missing secret', asy
 
 it('migrates actions, persists per-template controls, and repairs references after deletion', async () => {
   const repo = await import('../src/background/repository');
-  const initial = await repo.settingsView(); expect(initial.actions.map(a => a.id)).toEqual(['translate', 'summarize', 'explain']);
+  const initial = await repo.settingsView(); expect(initial.actions.map(a => a.id)).toEqual(['translate', 'summarize', 'explain', 'ask']);
   await repo.saveModel(config, 'SECRET');
   const action = { id: 'custom:tech' as const, name: 'Technical', icon: 'Code' as const, prompt: 'Explain {{selection}}', modelId: config.id, execution: 'edit' as const, showInQuickActions: false };
   await repo.saveAction(action);
@@ -93,6 +94,29 @@ it('migrates actions, persists per-template controls, and repairs references aft
   await expect(recovered.deleteAction('translate')).rejects.toThrow('不能删除');
   await expect(recovered.saveAction({ ...action, modelId: 'missing' })).rejects.toThrow('模型配置不存在');
   await expect(recovered.savePreferences({ ...initial.preferences, action: 'custom:missing' })).rejects.toThrow('操作模板不存在');
+});
+
+it('adds Ask AI to existing actions without resetting edits, visibility, order or preferences', async () => {
+  const actions = structuredClone(DEFAULT_ACTIONS.filter(action => action.id !== 'ask'));
+  actions[0] = { ...actions[0]!, name: 'My translation', prompt: 'Keep terminology: {{selection}}', showInQuickActions: false };
+  const custom = { ...actions[1]!, id: 'custom:kept' as const, name: 'Kept action', execution: 'edit' as const };
+  actions.unshift(custom);
+  local.data.settings = { preferences: { ...DEFAULT_PREFERENCES, action: custom.id }, actions, models: [], defaultModelId: null };
+  const repo = await import('../src/background/repository');
+  const upgraded = await repo.settingsView();
+  expect(upgraded.actions.slice(0, actions.length)).toEqual(actions);
+  expect(upgraded.actions.at(-1)).toMatchObject({ id: 'ask', execution: 'ask' });
+  expect(upgraded.preferences.action).toBe(custom.id);
+  await repo.saveAction({ ...upgraded.actions.at(-1)!, showInQuickActions: false });
+  await repo.savePreferences({ ...upgraded.preferences, action: 'ask' });
+  vi.resetModules();
+  const recovered = await import('../src/background/repository');
+  const view = await recovered.settingsView();
+  expect(view.actions.filter(action => action.id === 'ask')).toHaveLength(1);
+  expect(view.actions.at(-1)).toMatchObject({ id: 'ask', execution: 'ask', showInQuickActions: false });
+  expect(view.actions.slice(0, actions.length)).toEqual(actions);
+  expect(view.preferences.action).toBe('ask');
+  await expect(recovered.deleteAction('ask')).rejects.toThrow('不能删除');
 });
 
 it.each(['local', 'session'] as const)('keeps the previous key readable if a move to %s fails before metadata commits', async target => {
@@ -118,4 +142,20 @@ it('commits a persistent key with its model metadata and preserves it when the f
   session = area(); vi.stubGlobal('chrome', { storage: { local, session } }); vi.resetModules();
   const recovered = await import('../src/background/repository');
   expect((await recovered.settingsView()).models[0]).toMatchObject({ name: 'Renamed', keyStorage: 'local', hasKey: true });
+});
+it('commits first-model all-site selection with model settings and retains it after restart', async () => {
+  const repo = await import('../src/background/repository');
+  await repo.saveModel({ ...config, keyStorage: 'local' }, 'SECRET', true);
+  const commit = local.set.mock.calls.find(([values]) => (values.settings as { preferences: { allSites: boolean } } | undefined)?.preferences.allSites);
+  expect(commit?.[0]).toMatchObject({ 'key:model': 'SECRET', settings: { preferences: { allSites: true, autoSelection: true } } });
+  vi.resetModules();
+  const recovered = await import('../src/background/repository');
+  expect((await recovered.settingsView()).preferences).toMatchObject({ allSites: true, autoSelection: true });
+  await recovered.saveModel({ ...config, name: 'Renamed', keyStorage: 'local' });
+  expect((await recovered.settingsView()).preferences.allSites).toBe(true);
+});
+it('keeps per-site defaults when first-model all-site selection is unchecked', async () => {
+  const repo = await import('../src/background/repository');
+  await repo.saveModel(config, 'SECRET');
+  expect((await repo.settingsView()).preferences).toMatchObject({ allSites: false, autoSelection: true });
 });

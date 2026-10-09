@@ -6,6 +6,7 @@ export const DEFAULT_ACTIONS: PromptAction[] = [
   { id: 'translate', name: '翻译', icon: 'Languages', prompt: 'Translate the selected text into {{language}}. Preserve meaning, formatting, and technical terminology. Return only the translation, without an introduction.\n\nContent: {{selection}}', modelId: null, showInQuickActions: true, execution: 'direct' },
   { id: 'summarize', name: '总结', icon: 'ListFilter', prompt: 'Summarize the selected text in {{language}}. Be concise; adapt detail to its length. Do not invent information absent from the source.\n\nContent: {{selection}}', modelId: null, showInQuickActions: true, execution: 'direct' },
   { id: 'explain', name: '解释', icon: 'Sparkles', prompt: 'Explain the selected concept or passage in {{language}}. Use a helpful example when useful. Clearly distinguish source facts from your own supplementary explanation.\n\nContent: {{selection}}', modelId: null, showInQuickActions: true, execution: 'direct' },
+  { id: 'ask', name: '询问 AI', icon: 'MessageSquare', prompt: "Answer the user's question in {{language}} using the selected text as context. If the source is insufficient, say so. Clearly distinguish source facts from supplementary explanation.\n\nContent: {{selection}}", modelId: null, showInQuickActions: true, execution: 'ask' },
 ];
 export const isActionId = (value: unknown): value is Action => typeof value === 'string' && (DEFAULT_ACTIONS.some(a => a.id === value) || /^custom:[\w-]{1,80}$/.test(value));
 export const builtinAction = (id: Action) => DEFAULT_ACTIONS.find(a => a.id === id);
@@ -23,7 +24,8 @@ export function validateAction(value: PromptAction): PromptAction {
   if (typeof value.name !== 'string' || !value.name.trim() || value.name.length > 40) throw new Error('请输入操作名称（最多 40 字）。');
   if (!ACTION_ICONS.includes(value.icon)) throw new Error('请选择有效的图标。');
   if (value.modelId !== null && (typeof value.modelId !== 'string' || !/^[\w-]{1,80}$/.test(value.modelId))) throw new Error('模型配置不存在。');
-  if (typeof value.showInQuickActions !== 'boolean' || !['direct', 'edit'].includes(value.execution)) throw new Error('操作模板无效。');
+  if (typeof value.showInQuickActions !== 'boolean' || !['direct', 'edit', 'ask'].includes(value.execution)) throw new Error('操作模板无效。');
+  if ((value.id === 'ask') !== (value.execution === 'ask')) throw new Error('Ask AI 仅在发送消息时请求模型。');
   return { id: value.id, name: value.name.trim(), icon: value.icon, prompt: validatePrompt(value.prompt), modelId: value.modelId, showInQuickActions: value.showInQuickActions, execution: value.execution };
 }
 /** Never evaluate template code or interpolate webpage text into a system message. */

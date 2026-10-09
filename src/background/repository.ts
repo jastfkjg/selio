@@ -37,7 +37,9 @@ export async function readSaved(): Promise<Saved> {
   await (migration ??= migrateKeyStorage());
   const { settings } = await chrome.storage.local.get('settings');
   const saved = (settings as Saved | undefined) ?? { models: [], defaultModelId: null };
-  return { ...saved, actions: ('actions' in saved ? saved.actions : undefined) ?? structuredClone(DEFAULT_ACTIONS), preferences: { ...DEFAULT_PREFERENCES, ...('preferences' in saved ? saved.preferences : {}) } };
+  const actions = ('actions' in saved ? saved.actions : undefined) ?? structuredClone(DEFAULT_ACTIONS);
+  const missing = DEFAULT_ACTIONS.filter(action => !actions.some(savedAction => savedAction.id === action.id));
+  return { ...saved, actions: [...actions, ...structuredClone(missing)], preferences: { ...DEFAULT_PREFERENCES, ...('preferences' in saved ? saved.preferences : {}) } };
 }
 export async function readKey(model: ModelConfig): Promise<string> {
   await protectStorage();
@@ -61,7 +63,7 @@ export function mutateSettings(fn: (saved: Saved) => Promise<void | SettingsComm
   writes = operation.catch(() => undefined);
   return operation;
 }
-export async function saveModel(raw: ModelConfig, key?: string): Promise<void> {
+export async function saveModel(raw: ModelConfig, key?: string, enableAllSites = false): Promise<void> {
   const model = validateModel(raw);
   if (key !== undefined && (typeof key !== 'string' || key.length > 4096 || /[\r\n]/.test(key))) throw new Error('API Key 格式无效。');
   await mutateSettings(async saved => {
@@ -79,6 +81,10 @@ export async function saveModel(raw: ModelConfig, key?: string): Promise<void> {
     const other = model.keyStorage === 'local' ? chrome.storage.session : chrome.storage.local;
     saved.models = [...saved.models.filter(m => m.id !== model.id), model];
     saved.defaultModelId ??= model.id;
+    if (enableAllSites) {
+      saved.preferences.allSites = true;
+      saved.preferences.autoSelection = true;
+    }
     return {
       localValues: model.keyStorage === 'local' ? { [keyName]: secret } : undefined,
       afterCommit: () => other.remove(keyName),

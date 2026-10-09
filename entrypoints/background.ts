@@ -118,16 +118,22 @@ export default defineBackground(() => {
     });
   });
 
-  const pageLoads = new Map<number, Promise<void>>();
+  const pageLoads = new Map<number, { task: Promise<void>; conversationId?: string; version: number }>();
   const navigationVersions = new Map<number, number>();
-  function loadPage(tabId: number, expectedId?: string, reuse = false): Promise<void> {
+  async function loadPage(tabId: number, expectedId?: string, reuse = false): Promise<void> {
+    await ready;
+    const current = engine.get(tabId);
+    // Opening the sidebar must keep selection and general chats without reading the page.
+    if (reuse && current && !current.page) return;
+    if (current?.id !== expectedId) {
+      if (reuse) return;
+      throw new Error('会话已切换，请在当前会话重试。');
+    }
+    const version = navigationVersions.get(tabId) ?? 0;
     const pending = pageLoads.get(tabId);
-    if (pending) return pending;
+    if (pending?.conversationId === current?.id && pending?.version === version) return pending.task;
+    const isCurrent = () => engine.get(tabId)?.id === current?.id && (navigationVersions.get(tabId) ?? 0) === version;
     const task = (async () => {
-      await ready;
-      const version = navigationVersions.get(tabId) ?? 0;
-      const current = engine.get(tabId);
-      if (reuse && current?.mode === 'general') return;
       try {
         const tab = await chrome.tabs.get(tabId);
         if (!tab.url) throw new Error('无法读取此网页。请点击浏览器工具栏的 Selio 图标授予当前页访问权限，或在设置中授权此网站。');
@@ -135,27 +141,30 @@ export default defineBackground(() => {
         const saved = await readSaved();
         if (siteDisabled(new URL(tab.url).hostname, saved.preferences.disabledSites)) throw new Error('此网站已停用 Selio，请在网站权限中启用后重试。');
         if (reuse && current?.page?.url === tab.url && !current.page.stale) return;
+        if (!isCurrent()) return;
+        if (current?.pageError) engine.setPageError(tabId, current.id);
         try { await chrome.scripting.executeScript({ target: { tabId }, files: ['content-scripts/page-extractor.js'] }); }
         catch { throw new Error('无法读取此网页。请点击浏览器工具栏的 Selio 图标授予当前页访问权限，或在设置中授权此网站。'); }
         const result = await chrome.tabs.sendMessage(tabId, { type: 'selio:extract-page' }, { frameId: 0 }) as { page?: PageSnapshot; error?: string };
         if (!result.page) throw new Error(result.error || '未能提取正文。');
         const after = await chrome.tabs.get(tabId);
-        if ((navigationVersions.get(tabId) ?? 0) !== version || after.url !== result.page.url) throw new Error('网页已变化，请刷新正文后继续提问。');
+        if (!isCurrent()) return;
+        if (after.url !== result.page.url) throw new Error('网页已变化，请刷新正文后继续提问。');
         engine.startPage(tabId, result.page, saved.preferences, current?.modelId ?? saved.defaultModelId, expectedId);
       } catch (error) {
-        // Keep an existing conversation on refresh failure; a first visit can still chat without a page.
-        if (!engine.get(tabId) && (navigationVersions.get(tabId) ?? 0) === version) {
-          const saved = await readSaved();
-          if (!engine.get(tabId) && (navigationVersions.get(tabId) ?? 0) === version) {
-            engine.startChat(tabId, saved.preferences, saved.defaultModelId, undefined, error instanceof Error ? error.message : '未能提取正文。');
-            return;
-          }
+        // Late results belong to the conversation and navigation that started the extraction.
+        if (!isCurrent()) return;
+        const message = error instanceof Error ? error.message : '未能提取正文。';
+        if (current) {
+          engine.setPageError(tabId, current.id, message);
+          return;
         }
-        throw error;
+        const saved = await readSaved();
+        if (isCurrent()) engine.startChat(tabId, saved.preferences, saved.defaultModelId, undefined, message);
       }
     })();
-    pageLoads.set(tabId, task);
-    void task.finally(() => { if (pageLoads.get(tabId) === task) pageLoads.delete(tabId); }).catch(() => undefined);
+    pageLoads.set(tabId, { task, conversationId: current?.id, version });
+    void task.finally(() => { if (pageLoads.get(tabId)?.task === task) pageLoads.delete(tabId); }).catch(() => undefined);
     return task;
   }
   chrome.action.onClicked.addListener(tab => {
@@ -311,7 +320,12 @@ export default defineBackground(() => {
         case 'settings:get': return settingsView();
         case 'actions:save': await saveAction(p); break;
         case 'actions:delete': if (!isAction(p)) throw new Error('操作模板无效。'); await deleteAction(p); break;
-        case 'settings:model': await saveModel(p?.model, p?.key); break;
+        case 'settings:model': {
+          if (p?.enableAllSites !== undefined && typeof p.enableAllSites !== 'boolean') throw new Error('偏好设置无效。');
+          if (p?.enableAllSites && !await chrome.permissions.contains({ origins: ALL_SITES })) throw new Error('网站权限尚未授予。');
+          await saveModel(p?.model, p?.key, p?.enableAllSites === true);
+          break;
+        }
         case 'settings:delete': if (typeof p !== 'string') throw new Error('模型无效。'); await deleteModel(p); break;
         case 'settings:default': if (typeof p !== 'string') throw new Error('模型无效。'); await setDefault(p); break;
         case 'settings:preferences': await savePreferences(p); break;

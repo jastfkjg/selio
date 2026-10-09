@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ACTIONS, actionLabel, resolvePrompt, validateAction, validatePrompt } from '../src/shared/actions';
+import { DEFAULT_ACTIONS, actionLabel, builtinAction, resolvePrompt, validateAction, validatePrompt } from '../src/shared/actions';
 import { translator } from '../src/shared/i18n';
 import { buildMessages } from '../src/llm/prompts';
 import type { Conversation, PromptAction } from '../src/shared/types';
@@ -32,6 +32,14 @@ describe('prompt templates', () => {
   });
   it('localizes untouched built-in names without translating custom names', () => {
     expect(actionLabel(DEFAULT_ACTIONS[0]!, translator('en'))).toBe('Translate');
+    expect(actionLabel(builtinAction('ask')!, translator('en'))).toBe('Ask AI');
+    expect(actionLabel(builtinAction('ask')!, translator('zh-CN'))).toBe('询问 AI');
     expect(actionLabel({ ...template, name: '翻译' }, translator('en'))).toBe('翻译');
+  });
+  it('keeps Ask AI in message-only execution mode', () => {
+    const ask = builtinAction('ask')!;
+    expect(ask).toMatchObject({ icon: 'MessageSquare', execution: 'ask', showInQuickActions: true });
+    for (const execution of ['direct', 'edit'] as const) expect(() => validateAction({ ...ask, execution })).toThrow('发送消息');
+    expect(() => validateAction({ ...template, execution: 'ask' })).toThrow('发送消息');
   });
 });

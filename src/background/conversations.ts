@@ -82,6 +82,12 @@ export class ConversationEngine {
     if (!state?.page) return;
     this.stop(tabId); state.page.stale = true; this.emit(state);
   }
+  setPageError(tabId: number, id: string, error?: string) {
+    const state = this.require(tabId, id);
+    if (error) state.pageError = error;
+    else delete state.pageError;
+    this.emit(state);
+  }
   ask(tabId: number, id: string | undefined, text: string) {
     const state = this.require(tabId, id);
     if (state.page?.stale) throw new Error('网页已变化，请刷新正文后继续提问。');
@@ -98,7 +104,7 @@ export class ConversationEngine {
   retry(tabId: number, id: string | undefined) {
     const state = this.require(tabId, id);
     if (state.page?.stale) throw new Error('网页已变化，请刷新正文后继续提问。');
-    if ((state.page || state.mode === 'general') && !state.messages.some(m => m.role === 'user')) return;
+    if ((state.page || state.mode === 'general' || state.action === 'ask') && !state.messages.some(m => m.role === 'user')) return;
     if (state.status === 'editing') throw new Error('请先执行或取消 Prompt 编辑。');
     this.stop(tabId);
     if (state.messages.at(-1)?.role === 'assistant') state.messages.pop();
@@ -141,12 +147,14 @@ export class ConversationEngine {
     state.prompt = prompt ?? template.prompt; state.promptDraft = state.prompt;
     if (!preserveModel) state.modelId = template.modelId ?? state.modelId;
     delete state.error; delete state.editingStatus;
-    if (defer || template.execution === 'edit') { state.status = 'editing'; this.emit(state); }
+    if (state.action === 'ask') { state.status = 'idle'; this.emit(state); }
+    else if (defer || template.execution === 'edit') { state.status = 'editing'; this.emit(state); }
     else this.begin(state);
   }
   editPrompt(tabId: number, id: string | undefined) {
     const state = this.require(tabId, id);
     if (state.page || state.mode === 'general') throw new Error('网页问答不支持划词操作。');
+    if (state.action === 'ask') throw new Error('Ask AI 仅在发送消息时请求模型。');
     if (state.status === 'generating') throw new Error('请先停止当前生成。');
     if (state.status === 'editing') return;
     state.editingStatus = state.status;
@@ -165,6 +173,7 @@ export class ConversationEngine {
   }
   execute(tabId: number, id: string | undefined, text: string) {
     const state = this.require(tabId, id);
+    if (state.action === 'ask') throw new Error('Ask AI 仅在发送消息时请求模型。');
     if (state.status !== 'editing') return;
     state.prompt = validatePrompt(text); state.promptDraft = state.prompt;
     state.messages = []; state.draft = ''; delete state.editingStatus;

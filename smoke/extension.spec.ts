@@ -1,6 +1,7 @@
 import { test, expect, chromium, type BrowserContext, type Page, type Worker } from '@playwright/test';
 import type { SavedNote } from '../src/shared/types';
 import { createServer, type Server } from 'node:http';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -66,7 +67,17 @@ test.beforeAll(async () => {
   settings = await context.newPage();
   await settings.goto(`chrome-extension://${extensionId}/options.html`);
 });
-test.afterAll(async () => { await context?.close(); await new Promise<void>(resolve => server?.close(() => resolve())); if (profile) await rm(profile, { recursive: true, force: true }); });
+async function closeTestBrowser(browserContext: BrowserContext | undefined, browserProfile: string) {
+  await browserContext?.close();
+  if (browserProfile) await expect.poll(() => execFileSync('ps', ['-axo', 'args'], { encoding: 'utf8' }).includes(`--user-data-dir=${browserProfile}`)).toBe(false);
+}
+test.afterAll(async () => {
+  try { await closeTestBrowser(context, profile); }
+  finally {
+    try { await new Promise<void>(resolve => server?.close(() => resolve())); }
+    finally { if (profile) await rm(profile, { recursive: true, force: true }); }
+  }
+});
 
 async function choose(page: Page, label: string, option: string) {
   await page.getByRole('combobox', { name: label, exact: true }).click();
@@ -85,6 +96,7 @@ async function select(page: Page, id = 'source') {
 
 test('install, configure, select, stream, follow up, preserve, cancel and recover', async () => {
   await expect(settings.getByRole('heading', { name: "Connect a model" })).toBeVisible();
+  await expect(settings.getByRole('checkbox', { name: 'Enable automatic selection on all websites', exact: true })).toBeChecked();
   await expect(settings.locator('html')).toHaveAttribute('lang', 'en');
   await choose(settings, 'Interface language', '简体中文');
   await expect(settings.getByRole('heading', { name: '连接一个模型' })).toBeVisible();
@@ -124,6 +136,8 @@ test('install, configure, select, stream, follow up, preserve, cancel and recove
   await settings.getByLabel('Base URL', { exact: true }).fill(`${origin}/v1`);
   await settings.getByLabel("Model ID").fill('selio-mock');
   await settings.getByLabel('API Key', { exact: true }).fill('mock-key-for-testing');
+  // Existing per-site workflows remain available by explicitly opting out during setup.
+  await settings.getByRole('checkbox', { name: 'Enable automatic selection on all websites', exact: true }).uncheck();
   await settings.getByRole('button', { name: "Save model", exact: true }).click();
   await expect(settings.getByText("Model saved. Test the connection, then start reading on a webpage.")).toBeVisible();
   expect(await worker.evaluate(origin => chrome.permissions.contains({ origins: [`${origin}/*`] }), origin)).toBe(true);
@@ -361,6 +375,20 @@ test('side panel reuses the same conversation without another request', async ()
   await expect.poll(async () => (await inspect()).draft).toBe('保留这个草稿');
   expect(requests.length).toBe(count);
 
+  // Page extraction failures belong beside the page controls, not the translation result.
+  const originalArticle = await reading.locator('article').first().innerHTML();
+  await reading.locator('article').first().evaluate(element => { element.innerHTML = '<h1>Short</h1>'; });
+  await click('.page-context-toggle');
+  await expect.poll(() => evaluate<string>('document.querySelector(".page-unavailable")?.innerText || ""')).toContain('There is too little readable content');
+  expect((await inspect()).text).toContain('Page context could not be enabled. You can still use the selected text.');
+  expect((await inspect()).text).toContain('帮助我们看清重要的信息。');
+  expect((await inspect()).draft).toBe('保留这个草稿');
+  expect(await evaluate<number>('document.querySelectorAll(".error-notice").length')).toBe(0);
+  expect(await evaluate<string>('document.querySelector("[role=switch]").getAttribute("aria-checked")')).toBe('false');
+  expect(requests.length).toBe(count);
+  await reading.locator('article').first().evaluate((element, html) => { element.innerHTML = html; }, originalArticle);
+  await writeFile('test-results/selection-page-error.png', Buffer.from((await command<{ data: string }>('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+
   await cdp.detach();
 });
 
@@ -510,17 +538,87 @@ test('custom prompts support icons, model defaults, hidden actions, editing and 
   await settings.getByRole('button', { name: 'Edit Technical explanation', exact: true }).click();
   await expect(settings.getByLabel('Prompt template', { exact: true })).toHaveValue(/give a code example/);
   await settings.getByRole('button', { name: 'Close action editor' }).click();
-  for (const label of ['Summarize', 'Explain', 'Technical explanation']) await settings.getByRole('checkbox', { name: `Show quick action ${label}`, exact: true }).click();
+  for (const label of ['Summarize', 'Explain', 'Ask AI', 'Technical explanation']) await settings.getByRole('checkbox', { name: `Show quick action ${label}`, exact: true }).click();
   await expect(page.locator('.action-tabs button')).toHaveCount(0);
   await choose(page, 'More actions', 'Explain');
   await expect(page.getByText('Complete', { exact: true })).toBeVisible();
-  for (const label of ['Translate', 'Summarize', 'Explain']) await settings.getByRole('checkbox', { name: `Show quick action ${label}`, exact: true }).click();
+  for (const label of ['Translate', 'Summarize', 'Explain', 'Ask AI']) await settings.getByRole('checkbox', { name: `Show quick action ${label}`, exact: true }).click();
   await settings.getByRole('button', { name: 'Delete Technical explanation', exact: true }).click();
   await settings.getByRole('button', { name: 'Delete action', exact: true }).click();
   await expect(settings.getByRole('combobox', { name: 'Default action' })).toHaveText('Translate');
   await expect(page.getByText('Native Anthropic response.', { exact: true })).toBeVisible();
   await page.close();
   expect(errors).toEqual([]);
+});
+
+test('Ask AI waits for messages and preserves selection context without automatic requests', async () => {
+  await settings.bringToFront();
+  await settings.getByRole('button', { name: 'Actions & prompts', exact: false }).click();
+  const row = settings.locator('.action-setting').filter({ hasText: 'Ask AI' });
+  await expect(row).toContainText('Send when you message');
+  await settings.getByRole('button', { name: 'Edit Ask AI', exact: true }).click();
+  await expect(settings.getByText('Opening this action makes no model request. Send a message to ask AI.', { exact: true })).toBeVisible();
+  await expect(settings.getByRole('radio', { name: 'Run immediately', exact: false })).toHaveCount(0);
+  await choose(settings, 'Default model for this action', 'Claude mock');
+  await settings.getByRole('button', { name: 'Save action', exact: true }).click();
+  await choose(settings, 'Default action', 'Ask AI');
+  await settings.screenshot({ path: 'test-results/ask-ai-actions.png', animations: 'disabled', fullPage: true });
+  const page = await context.newPage();
+  try {
+    await page.goto(origin);
+    const before = requests.length, nativeBefore = nativeRequests.length;
+    await select(page);
+    await page.getByRole('button', { name: 'Read selected text with Selio', exact: true }).hover();
+    await expect(page.getByRole('heading', { name: 'What would you like to know about this text?' })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Switch model' })).toContainText('Claude mock');
+    await expect(page.getByRole('button', { name: 'Regenerate', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Edit prompt', exact: true })).toHaveCount(0);
+    const input = page.getByRole('textbox', { name: 'Ask AI', exact: true });
+    await input.fill('   ');
+    await expect(page.getByRole('button', { name: 'Send question', exact: true })).toBeDisabled();
+    await input.fill('Unsent draft');
+    await page.getByRole('button', { name: 'Show context', exact: true }).click();
+    await choose(page, 'Context', 'Selection + surrounding paragraph');
+    await expect(page.locator('.paragraph-preview')).toContainText('Attention is');
+    await choose(page, 'Switch model', 'Local mock');
+    await input.fill('What does attention mean here?');
+    await page.screenshot({ path: 'test-results/ask-ai-ready.png', animations: 'disabled' });
+    expect(requests.length).toBe(before);
+    expect(nativeRequests.length).toBe(nativeBefore);
+    await page.getByRole('button', { name: 'Send question', exact: true }).click();
+    await expect(page.getByText('Complete', { exact: true })).toBeVisible();
+    expect(requests.length).toBe(before + 1);
+    expect(nativeRequests.length).toBe(nativeBefore);
+    expect(requests.at(-1)?.messages.map(message => message.role)).toEqual(['system', 'user', 'user']);
+    expect(JSON.parse(requests.at(-1)!.messages[1]!.content)).toMatchObject({ selected_text: await page.locator('#source').innerText(), surrounding_paragraph: await page.locator('#source').innerText() });
+    expect(requests.at(-1)?.messages.at(-1)?.content).toBe('What does attention mean here?');
+    await input.fill('Give an example'); await input.press('Enter');
+    await expect(page.getByText('Complete', { exact: true })).toBeVisible();
+    expect(requests.length).toBe(before + 2);
+    expect(requests.at(-1)?.messages.map(message => message.role)).toEqual(['system', 'user', 'user', 'assistant', 'user']);
+    await input.fill('Keep my Ask AI draft');
+    await settings.getByRole('checkbox', { name: 'Show quick action Ask AI', exact: true }).click();
+    await expect(settings.getByRole('checkbox', { name: 'Show quick action Ask AI', exact: true })).not.toBeChecked();
+    await expect(page.getByRole('button', { name: 'Ask AI', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Summarize', exact: true }).click();
+    await expect(page.getByText('Complete', { exact: true })).toBeVisible();
+    await choose(page, 'More actions', 'Ask AI');
+    await expect(input).toHaveValue('Keep my Ask AI draft');
+    expect(requests.length).toBe(before + 3);
+    expect(nativeRequests.length).toBe(nativeBefore);
+    await page.getByRole('button', { name: 'Close panel and keep conversation', exact: true }).click();
+    await select(page);
+    await page.getByRole('button', { name: 'Read selected text with Selio', exact: true }).click();
+    await expect(input).toHaveValue('Keep my Ask AI draft');
+    expect(requests.length).toBe(before + 3);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+  await settings.getByRole('checkbox', { name: 'Show quick action Ask AI', exact: true }).click();
+  await expect(settings.getByRole('checkbox', { name: 'Show quick action Ask AI', exact: true })).toBeChecked();
+  await settings.getByRole('button', { name: 'Edit Ask AI', exact: true }).click();
+  await choose(settings, 'Default model for this action', 'Follow current model');
+  await settings.getByRole('button', { name: 'Save action', exact: true }).click();
+  await choose(settings, 'Default action', 'Translate');
 });
 
 test('privacy boundary, theme, viewport and permission revocation', async () => {
@@ -837,4 +935,58 @@ test('Ask This Page extracts without selection, exposes request evidence and ref
   expect(requests.at(-1)!.messages[1]).toEqual({ role: 'user', content: 'Say hello' });
   await unavailable.close();
   await cdp.detach(); await popup.close(); await page.close();
+});
+
+test('first model setup defaults to automatic selection on all sites after one permission grant', async () => {
+  const onboardingProfile = await mkdtemp(path.join(tmpdir(), 'selio-onboarding-'));
+  let onboarding: BrowserContext | undefined;
+  try {
+    const extension = path.resolve('.output/chrome-mv3');
+    onboarding = await chromium.launchPersistentContext(onboardingProfile, {
+      channel: 'chromium', headless: true,
+      ...(process.env.SELIO_CHROMIUM_PATH ? { executablePath: process.env.SELIO_CHROMIUM_PATH } : {}),
+      args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
+      viewport: { width: 1360, height: 900 },
+    });
+    const onboardingWorker = onboarding.serviceWorkers()[0] ?? await onboarding.waitForEvent('serviceworker');
+    const id = new URL(onboardingWorker.url()).host;
+    const options = await onboarding.newPage();
+    await options.goto(`chrome-extension://${id}/options.html`);
+    await expect(options.getByRole('checkbox', { name: 'Enable automatic selection on all websites', exact: true })).toBeChecked();
+    expect(await onboardingWorker.evaluate(() => chrome.permissions.contains({ origins: ['http://*/*', 'https://*/*'] }))).toBe(false);
+    const alreadyOpen = await onboarding.newPage();
+    await alreadyOpen.goto(origin + '/onboarding');
+    await expect(alreadyOpen.locator('selio-assistant')).toHaveCount(0);
+    const manager = await onboarding.newPage();
+    await manager.goto('chrome://extensions');
+    // Consent is granted through Chromium; the real Save model gesture still requests it.
+    await manager.evaluate(async id => {
+      const api = (chrome as unknown as { developerPrivate: { addHostPermission: (id: string, host: string) => Promise<void> } }).developerPrivate;
+      for (const host of ['http://*/*', 'https://*/*']) await api.addHostPermission(id, host);
+    }, id);
+    await manager.close();
+    await choose(options, 'Provider', 'Custom');
+    await options.getByLabel('Display name').fill('Setup model');
+    await options.getByLabel('Base URL', { exact: true }).fill(`${origin}/v1`);
+    await options.getByLabel('Model ID').fill('selio-mock');
+    await options.getByLabel('API Key', { exact: true }).fill('mock-onboarding-key');
+    const before = requests.length;
+    await options.getByRole('button', { name: 'Save model', exact: true }).click();
+    await expect(options.getByText('Model saved. Automatic selection is enabled on all websites.', { exact: true })).toBeVisible();
+    expect(await onboardingWorker.evaluate(async () => ((await chrome.storage.local.get('settings')).settings as { preferences: { allSites: boolean; autoSelection: boolean } }).preferences)).toMatchObject({ allSites: true, autoSelection: true });
+    await select(alreadyOpen);
+    const anotherSite = await onboarding.newPage();
+    await anotherSite.goto(origin.replace('127.0.0.1', 'localhost'));
+    await select(anotherSite);
+    expect(requests.length).toBe(before);
+    await options.getByRole('button', { name: 'Privacy & access' }).click();
+    await expect(options.getByRole('checkbox', { name: 'Allow all websites', exact: true })).toBeChecked();
+    await options.getByRole('checkbox', { name: 'Allow all websites', exact: true }).click();
+    await expect(options.getByRole('checkbox', { name: 'Allow all websites', exact: true })).not.toBeChecked();
+    await expect.poll(() => onboardingWorker.evaluate(() => chrome.scripting.getRegisteredContentScripts())).toEqual([]);
+    expect(await onboardingWorker.evaluate(async () => ((await chrome.storage.local.get('settings')).settings as { preferences: { allSites: boolean } }).preferences.allSites)).toBe(false);
+  } finally {
+    try { await closeTestBrowser(onboarding, onboardingProfile); }
+    finally { await rm(onboardingProfile, { recursive: true, force: true }); }
+  }
 });
