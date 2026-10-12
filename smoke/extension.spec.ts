@@ -83,6 +83,22 @@ async function choose(page: Page, label: string, option: string) {
   await page.getByRole('combobox', { name: label, exact: true }).click();
   await page.getByRole('option', { name: option, exact: true }).click();
 }
+async function moveActionToTop(page: Page, name: string) {
+  const rows = page.locator('.action-setting');
+  const row = rows.filter({ has: page.getByRole('button', { name: `Edit ${name}`, exact: true }) });
+  const up = row.getByRole('button', { name: `Move up ${name}`, exact: true });
+  const index = await row.evaluate(element => Array.from(element.parentElement!.children).indexOf(element));
+  for (let position = index; position > 0; position--) {
+    await up.click();
+    await expect(rows.nth(position - 1)).toContainText(name);
+  }
+  await expect(rows.first()).toContainText(name);
+  await expect(row.locator('.default-label')).toHaveText('Default');
+}
+async function chooseMoreAction(page: Page, action: string) {
+  await page.getByRole('button', { name: 'More actions', exact: true }).click();
+  await page.getByRole('menuitem', { name: action, exact: true }).click();
+}
 
 async function select(page: Page, id = 'source') {
   await page.bringToFront();
@@ -106,19 +122,10 @@ test('install, configure, select, stream, follow up, preserve, cancel and recove
   await expect(settings.getByRole('heading', { name: 'Connect a model' })).toBeVisible();
   expect(await worker.evaluate(async () => ((await chrome.storage.local.get('settings')).settings as { preferences: { language: string } }).preferences.language)).toBe('简体中文');
   const manifest = await worker.evaluate(() => chrome.runtime.getManifest());
-  expect(manifest.host_permissions ?? []).toEqual([]);
+  expect(manifest.host_permissions?.sort()).toEqual(['http://*/*', 'https://*/*']);
+  expect(manifest.optional_host_permissions ?? []).toEqual([]);
   expect(manifest.content_scripts ?? []).toEqual([]);
-  expect(await worker.evaluate(() => chrome.permissions.contains({ origins: ['http://127.0.0.1/*'] }))).toBe(false);
-  // Set up user consent through Chromium's own extension settings API in this
-  // disposable profile. Native permission dialogs are outside Playwright's DOM.
-  // No extension APIs are mocked and the production manifest is not rewritten.
-  const manager = await context.newPage();
-  await manager.goto('chrome://extensions');
-  await manager.evaluate(async ({ id, host }) => {
-    const api = (chrome as unknown as { developerPrivate: { addHostPermission: (id: string, host: string) => Promise<void> } }).developerPrivate;
-    await api.addHostPermission(id, host);
-  }, { id: extensionId, host: `${origin}/*` });
-  await manager.close();
+  expect(await worker.evaluate(() => chrome.permissions.contains({ origins: ['http://127.0.0.1/*'] }))).toBe(true);
   await settings.screenshot({ animations: 'disabled', path: 'test-results/settings-initial.png', fullPage: true });
   await settings.getByRole('combobox', { name: 'Provider', exact: true }).click();
   await expect(settings.getByRole('listbox').getByRole('option')).toHaveCount(7);
@@ -151,6 +158,7 @@ test('install, configure, select, stream, follow up, preserve, cancel and recove
   await select(reading, 'second');
   await reading.getByRole('button', { name: 'Read selected text with Selio', exact: true }).click();
   await expect(reading.getByText('Complete', { exact: true })).toBeVisible();
+  await expect(reading.locator('.composer-model')).toHaveText('selio-mock');
   await reading.getByRole('textbox', { name: 'Ask a follow-up' }).fill('discarded draft');
   await select(reading);
   const before = requests.length;
@@ -445,8 +453,10 @@ test('Anthropic connects and generates through native Messages, with responsive 
   expect(nativeRequests.at(-1)?.system).toBeTruthy();
   expect(nativeRequests.at(-1)?.messages.every(m => m.role !== 'system')).toBe(true);
   const switchCount = requests.length;
+  await expect(nativePage.getByRole('combobox', { name: 'Switch model' })).toHaveText('claude-sonnet-4-6');
   await nativePage.getByRole('textbox', { name: 'Ask a follow-up' }).fill('Switch model and keep history');
-  await choose(nativePage, 'Switch model', 'Local mock');
+  await choose(nativePage, 'Switch model', 'selio-mock · Local mock');
+  await expect(nativePage.getByRole('combobox', { name: 'Switch model' })).toHaveText('selio-mock');
   expect(requests.length).toBe(switchCount);
   await expect(nativePage.getByText('Native Anthropic response.', { exact: true })).toBeVisible();
   await expect(nativePage.getByRole('textbox', { name: 'Ask a follow-up' })).toHaveValue('Switch model and keep history');
@@ -475,7 +485,7 @@ test('Anthropic connects and generates through native Messages, with responsive 
   await settings.getByRole('button', { name: 'Close model editor' }).click();
 });
 
-test('custom prompts support icons, model defaults, hidden actions, editing and cached conversations', async () => {
+test('custom prompts support ordering, enabled actions, model defaults, editing and cached conversations', async () => {
   await settings.bringToFront();
   await settings.getByRole('button', { name: 'Actions & prompts', exact: false }).click();
   await settings.getByRole('button', { name: 'New action', exact: true }).click();
@@ -485,12 +495,22 @@ test('custom prompts support icons, model defaults, hidden actions, editing and 
   await choose(settings, 'Default model for this action', 'Claude mock');
   await settings.getByRole('button', { name: 'Save action', exact: true }).click();
   await expect(settings.getByRole('button', { name: 'Edit Technical explanation', exact: true })).toBeVisible();
-  await settings.getByRole('checkbox', { name: 'Show quick action Translate', exact: true }).click();
-  await choose(settings, 'Default action', 'Technical explanation');
+  await settings.getByRole('checkbox', { name: 'Enable action Translate', exact: true }).click();
+  await moveActionToTop(settings, 'Technical explanation');
+  const moveDown = settings.getByRole('button', { name: 'Move down Technical explanation', exact: true });
+  await expect(moveDown).toBeFocused();
+  await moveDown.press('Enter');
+  await expect(settings.locator('.action-setting').nth(1)).toContainText('Technical explanation');
+  await expect(moveDown).toBeFocused();
+  await moveDown.press('Enter');
+  await expect(settings.locator('.action-setting').nth(2)).toContainText('Technical explanation');
+  await expect(settings.locator('.action-setting').filter({ hasText: 'Summarize' }).locator('.default-label')).toHaveText('Default');
+  await moveActionToTop(settings, 'Technical explanation');
   await settings.reload();
   await settings.getByRole('button', { name: 'Actions & prompts', exact: false }).click();
-  await expect(settings.getByRole('combobox', { name: 'Default action' })).toHaveText('Technical explanation');
-  await expect(settings.getByRole('checkbox', { name: 'Show quick action Translate', exact: true })).not.toBeChecked();
+  await expect(settings.locator('.action-setting').first()).toContainText('Technical explanation');
+  await expect(settings.locator('.action-setting').first().locator('.default-label')).toHaveText('Default');
+  await expect(settings.getByRole('checkbox', { name: 'Enable action Translate', exact: true })).not.toBeChecked();
   await settings.screenshot({ path: 'test-results/custom-actions.png', animations: 'disabled', fullPage: true });
   const page = await context.newPage(); await page.goto(origin);
   const before = nativeRequests.length;
@@ -501,9 +521,22 @@ test('custom prompts support icons, model defaults, hidden actions, editing and 
   expect(nativeRequests.at(-1)?.system).not.toContain('Attention is');
   expect(nativeRequests.at(-1)?.messages[0]?.content).toContain('Attention is');
   await expect(page.getByRole('button', { name: 'Translate', exact: true })).not.toBeVisible();
-  await page.getByRole('combobox', { name: 'More actions' }).click();
-  await expect(page.getByRole('option', { name: 'Translate', exact: true })).toBeVisible();
-  await page.getByRole('combobox', { name: 'More actions' }).press('Escape');
+  const moreActions = page.getByRole('button', { name: 'More actions', exact: true });
+  await moreActions.press('ArrowDown');
+  await expect(page.locator('.action-tabs button')).toHaveText(['Technical explanation', 'Summarize', 'Explain']);
+  await expect(page.getByRole('menuitem', { name: 'Ask AI', exact: true })).toBeFocused();
+  await expect(page.getByRole('menuitem', { name: 'Translate', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('menu').getByRole('menuitem')).toHaveCount(1);
+  await page.getByRole('menuitem', { name: 'Ask AI', exact: true }).press('Escape');
+  await expect(moreActions).toBeFocused();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  expect(nativeRequests.length).toBe(before + 1);
+  await chooseMoreAction(page, 'Ask AI');
+  await expect(page.getByRole('heading', { name: 'What would you like to know?', exact: true })).toBeVisible();
+  await expect(page.locator('.header-caption')).toHaveText('Ask AI');
+  await page.getByRole('button', { name: 'Technical explanation', exact: true }).click();
+  await expect(page.getByText('Complete', { exact: true })).toBeVisible();
+  expect(nativeRequests.length).toBe(before + 1);
 
   await settings.getByRole('button', { name: 'Edit Technical explanation', exact: true }).click();
   await settings.getByRole('radio', { name: 'Edit before running', exact: false }).check();
@@ -538,14 +571,14 @@ test('custom prompts support icons, model defaults, hidden actions, editing and 
   await settings.getByRole('button', { name: 'Edit Technical explanation', exact: true }).click();
   await expect(settings.getByLabel('Prompt template', { exact: true })).toHaveValue(/give a code example/);
   await settings.getByRole('button', { name: 'Close action editor' }).click();
-  for (const label of ['Summarize', 'Explain', 'Ask AI', 'Technical explanation']) await settings.getByRole('checkbox', { name: `Show quick action ${label}`, exact: true }).click();
+  for (const label of ['Summarize', 'Explain', 'Ask AI', 'Technical explanation']) await settings.getByRole('checkbox', { name: `Enable action ${label}`, exact: true }).click();
   await expect(page.locator('.action-tabs button')).toHaveCount(0);
-  await choose(page, 'More actions', 'Explain');
-  await expect(page.getByText('Complete', { exact: true })).toBeVisible();
-  for (const label of ['Translate', 'Summarize', 'Explain', 'Ask AI']) await settings.getByRole('checkbox', { name: `Show quick action ${label}`, exact: true }).click();
+  await expect(moreActions).toHaveCount(0);
+  await expect(settings.getByText('All actions are disabled. Enable an action to read selected text.', { exact: true })).toBeVisible();
+  for (const label of ['Translate', 'Summarize', 'Explain', 'Ask AI']) await settings.getByRole('checkbox', { name: `Enable action ${label}`, exact: true }).click();
   await settings.getByRole('button', { name: 'Delete Technical explanation', exact: true }).click();
   await settings.getByRole('button', { name: 'Delete action', exact: true }).click();
-  await expect(settings.getByRole('combobox', { name: 'Default action' })).toHaveText('Translate');
+  await expect(settings.locator('.action-setting').filter({ hasText: 'Translate' }).locator('.default-label')).toHaveText('Default');
   await expect(page.getByText('Native Anthropic response.', { exact: true })).toBeVisible();
   await page.close();
   expect(errors).toEqual([]);
@@ -561,7 +594,7 @@ test('Ask AI waits for messages and preserves selection context without automati
   await expect(settings.getByRole('radio', { name: 'Run immediately', exact: false })).toHaveCount(0);
   await choose(settings, 'Default model for this action', 'Claude mock');
   await settings.getByRole('button', { name: 'Save action', exact: true }).click();
-  await choose(settings, 'Default action', 'Ask AI');
+  await moveActionToTop(settings, 'Ask AI');
   await settings.screenshot({ path: 'test-results/ask-ai-actions.png', animations: 'disabled', fullPage: true });
   const page = await context.newPage();
   try {
@@ -569,18 +602,49 @@ test('Ask AI waits for messages and preserves selection context without automati
     const before = requests.length, nativeBefore = nativeRequests.length;
     await select(page);
     await page.getByRole('button', { name: 'Read selected text with Selio', exact: true }).hover();
-    await expect(page.getByRole('heading', { name: 'What would you like to know about this text?' })).toBeVisible();
-    await expect(page.getByRole('combobox', { name: 'Switch model' })).toContainText('Claude mock');
-    await expect(page.getByRole('button', { name: 'Regenerate', exact: true })).toBeDisabled();
+    await expect(page.getByRole('heading', { name: 'What would you like to know?', exact: true })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Switch model' })).toHaveText('claude-sonnet-4-6');
+    await expect(page.getByRole('button', { name: 'Regenerate', exact: true })).toHaveCount(0);
+    await expect(page.locator('.response-tools, .chat-footer, .header-caption')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Edit prompt', exact: true })).toHaveCount(0);
     const input = page.getByRole('textbox', { name: 'Ask AI', exact: true });
+    await expect(input).toHaveAttribute('placeholder', 'Ask a question…');
+    await expect(page.locator('.action-tabs button')).toHaveText(['Ask AI', 'Translate', 'Summarize']);
+    const moreActions = page.getByRole('button', { name: 'More actions', exact: true });
+    await expect(moreActions).toBeVisible();
+    const toolbar = page.locator('.action-toolbar');
+    expect((await toolbar.boundingBox())!.height).toBe(44);
+    await page.getByRole('dialog').screenshot({ path: 'test-results/popup-simplified.png', animations: 'disabled' });
+    await moreActions.click();
+    await expect(page.getByRole('menuitem', { name: 'Explain', exact: true })).toBeFocused();
+    await page.getByRole('dialog').screenshot({ path: 'test-results/popup-more-actions.png', animations: 'disabled' });
+    await page.getByRole('menuitem', { name: 'Explain', exact: true }).press('Tab');
+    await expect(page.getByRole('button', { name: 'Show context', exact: true })).toBeFocused();
+    await expect(page.getByRole('menu')).not.toBeVisible();
+    await moreActions.click();
+    await input.click();
+    await expect(page.getByRole('menu')).not.toBeVisible();
+    await page.setViewportSize({ width: 390, height: 700 });
+    await moreActions.click();
+    const menuBox = (await page.getByRole('menu').boundingBox())!;
+    expect(menuBox.x).toBeGreaterThanOrEqual(0);
+    expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(390);
+    expect((await toolbar.boundingBox())!.height).toBe(44);
+    await page.screenshot({ path: 'test-results/popup-more-actions-narrow.png', animations: 'disabled' });
+    await page.getByRole('menuitem', { name: 'Explain', exact: true }).press('Escape');
+    await page.setViewportSize({ width: 1360, height: 900 });
+    await settings.getByRole('checkbox', { name: 'Enable action Explain', exact: true }).click();
+    await expect(moreActions).toHaveCount(0);
+    await expect(page.locator('.action-tabs button')).toHaveText(['Ask AI', 'Translate', 'Summarize']);
+    await settings.getByRole('checkbox', { name: 'Enable action Explain', exact: true }).click();
+    await expect(moreActions).toBeVisible();
     await input.fill('   ');
     await expect(page.getByRole('button', { name: 'Send question', exact: true })).toBeDisabled();
     await input.fill('Unsent draft');
     await page.getByRole('button', { name: 'Show context', exact: true }).click();
     await choose(page, 'Context', 'Selection + surrounding paragraph');
     await expect(page.locator('.paragraph-preview')).toContainText('Attention is');
-    await choose(page, 'Switch model', 'Local mock');
+    await choose(page, 'Switch model', 'selio-mock · Local mock');
     await input.fill('What does attention mean here?');
     await page.screenshot({ path: 'test-results/ask-ai-ready.png', animations: 'disabled' });
     expect(requests.length).toBe(before);
@@ -597,12 +661,14 @@ test('Ask AI waits for messages and preserves selection context without automati
     expect(requests.length).toBe(before + 2);
     expect(requests.at(-1)?.messages.map(message => message.role)).toEqual(['system', 'user', 'user', 'assistant', 'user']);
     await input.fill('Keep my Ask AI draft');
-    await settings.getByRole('checkbox', { name: 'Show quick action Ask AI', exact: true }).click();
-    await expect(settings.getByRole('checkbox', { name: 'Show quick action Ask AI', exact: true })).not.toBeChecked();
+    await settings.getByRole('checkbox', { name: 'Enable action Ask AI', exact: true }).click();
+    await expect(settings.getByRole('checkbox', { name: 'Enable action Ask AI', exact: true })).not.toBeChecked();
     await expect(page.getByRole('button', { name: 'Ask AI', exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: 'Summarize', exact: true }).click();
     await expect(page.getByText('Complete', { exact: true })).toBeVisible();
-    await choose(page, 'More actions', 'Ask AI');
+    await expect(page.getByRole('button', { name: 'More actions', exact: true })).toHaveCount(0);
+    await settings.getByRole('checkbox', { name: 'Enable action Ask AI', exact: true }).click();
+    await page.getByRole('button', { name: 'Ask AI', exact: true }).click();
     await expect(input).toHaveValue('Keep my Ask AI draft');
     expect(requests.length).toBe(before + 3);
     expect(nativeRequests.length).toBe(nativeBefore);
@@ -613,15 +679,14 @@ test('Ask AI waits for messages and preserves selection context without automati
     expect(requests.length).toBe(before + 3);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
-  await settings.getByRole('checkbox', { name: 'Show quick action Ask AI', exact: true }).click();
-  await expect(settings.getByRole('checkbox', { name: 'Show quick action Ask AI', exact: true })).toBeChecked();
+  await expect(settings.getByRole('checkbox', { name: 'Enable action Ask AI', exact: true })).toBeChecked();
   await settings.getByRole('button', { name: 'Edit Ask AI', exact: true }).click();
   await choose(settings, 'Default model for this action', 'Follow current model');
   await settings.getByRole('button', { name: 'Save action', exact: true }).click();
-  await choose(settings, 'Default action', 'Translate');
+  await moveActionToTop(settings, 'Translate');
 });
 
-test('privacy boundary, theme, viewport and permission revocation', async () => {
+test('privacy boundary, theme, viewport and per-site selection removal', async () => {
   const tabId = await worker.evaluate(async origin => (await chrome.tabs.query({})).find(t => t.url === `${origin}/`)!.id!, origin);
   const isolation = await worker.evaluate(async tabId => {
     const results = await chrome.scripting.executeScript({ target: { tabId }, func: async () => {
@@ -656,7 +721,7 @@ test('privacy boundary, theme, viewport and permission revocation', async () => 
   await settings.bringToFront();
   await settings.getByRole('button', { name: "Privacy & access" }).click();
   await settings.getByRole('button', { name: `Revoke ${origin}/*`, exact: true }).click();
-  await expect(settings.getByText("Website access removed.")).toBeVisible();
+  await expect(settings.getByText("Website removed from the automatic selection list.")).toBeVisible();
   await reading.bringToFront();
   await reading.getByRole('button', { name: "Close panel and keep conversation" }).click();
   await reading.mouse.click(20, 20);
@@ -690,19 +755,13 @@ test('token usage reports native and compatible counts, stays local and supports
   await choose(settings, '界面语言', 'English');
 });
 
-test('one all-sites grant enables another host and revocation removes automatic access', async () => {
-  const manager = await context.newPage(); await manager.goto('chrome://extensions');
-  await manager.evaluate(async id => {
-    const api = (chrome as unknown as { developerPrivate: { addHostPermission: (id: string, host: string) => Promise<void> } }).developerPrivate;
-    await api.addHostPermission(id, 'https://*/*'); await api.addHostPermission(id, 'http://*/*');
-  }, extensionId);
-  await manager.close();
+test('all-site selection enables another host and disabling it removes automatic selection', async () => {
   await settings.getByRole('button', { name: 'Privacy & access', exact: false }).click();
   await settings.getByRole('checkbox', { name: 'Allow all websites' }).click();
   await expect(settings.getByRole('checkbox', { name: 'Allow all websites' })).toBeChecked();
   await expect.poll(async () => worker.evaluate(async () => (await chrome.scripting.getRegisteredContentScripts())[0]?.matches?.sort())).toEqual(['http://*/*', 'https://*/*']);
   const other = await context.newPage(); await other.goto(origin.replace('127.0.0.1', 'localhost'));
-  await select(other); // This origin was never individually approved.
+  await select(other); // This origin is not in the per-site list.
   const count = requests.length;
   await expect(other.getByRole('button', { name: 'Read selected text with Selio', exact: true })).toBeVisible();
   expect(requests.length).toBe(count);
@@ -735,9 +794,6 @@ test('saved API keys survive an extension reload without reconfiguration', async
   const expected = await worker.evaluate(async () => ((await chrome.storage.local.get('settings')).settings as { models: { keyStorage: string }[] }).models.map(model => ({ keyStorage: model.keyStorage, hasKey: true })));
   const manager = await context.newPage();
   await manager.goto('chrome://extensions');
-  await manager.evaluate(async ({ id, host }) => {
-    await (chrome as unknown as { developerPrivate: { addHostPermission: (id: string, host: string) => Promise<void> } }).developerPrivate.addHostPermission(id, host);
-  }, { id: extensionId, host: `${origin}/*` });
   await settings.getByRole('button', { name: 'Privacy & access' }).click();
   await settings.getByLabel('Website address').fill(origin);
   await settings.getByRole('button', { name: 'Allow website', exact: true }).click();
@@ -794,15 +850,7 @@ test('saved API keys survive a complete browser restart', async () => {
 test('Ask This Page extracts without selection, exposes request evidence and refreshes safely', async () => {
   const page = await context.newPage();
   await page.goto(origin + '/ask-page');
-  const manager = await context.newPage();
-  await manager.goto('chrome://extensions');
-  await manager.evaluate(async ({ id, host }) => {
-    const api = (chrome as unknown as { developerPrivate: { addHostPermission: (id: string, host: string) => Promise<void> } }).developerPrivate;
-    await api.addHostPermission(id, host);
-  }, { id: extensionId, host: `${origin}/*` });
-  await manager.close();
-  // The earlier revocation test removed optional host permissions. Complete the
-  // extension's own permission request after granting consent in Chromium.
+  // Restore per-site automatic selection after removing this site from the list.
   await settings.getByRole('button', { name: 'Privacy & access' }).click();
   await settings.getByLabel('Website address').fill(origin);
   await settings.getByRole('button', { name: 'Allow website', exact: true }).click();
@@ -843,6 +891,8 @@ test('Ask This Page extracts without selection, exposes request evidence and ref
   await expect.poll(text).toContain('What would you like to know?');
   expect(requests.length).toBe(before);
   expect(await evaluate<number>('document.querySelectorAll(".page-tools, .page-chat .brand, .page-chat .response-tools").length')).toBe(0);
+  expect(await evaluate<boolean>('document.querySelector(".chat-header").contains(document.querySelector("[role=switch]"))')).toBe(true);
+  expect(await evaluate<string>('document.querySelector(".composer-model").textContent')).toBe('selio-mock');
   expect(await evaluate<boolean>('document.querySelector(".page-context").open')).toBe(false);
   await command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   await click('Inspect extracted content', 'summary');
@@ -928,6 +978,19 @@ test('Ask This Page extracts without selection, exposes request evidence and ref
   await unavailable.bringToFront();
   await expect.poll(text).toContain('Page unavailable');
   expect(await evaluate<boolean>('document.querySelector("textarea").disabled')).toBe(false);
+  expect(await evaluate<number>('document.querySelectorAll(".panel-chat-title, .general-chat-hint, .page-context-controls").length')).toBe(0);
+  expect(await evaluate<string>('document.querySelector(".composer-model").textContent')).toBe('selio-mock');
+  expect(await evaluate<boolean>('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await settings.getByRole('button', { name: 'Reading preferences' }).click();
+  await choose(settings, 'Appearance', 'Light');
+  await unavailable.bringToFront();
+  await expect.poll(() => evaluate<string>('document.querySelector(".panel-shell")?.getAttribute("data-theme")')).toBe('light');
+  await writeFile('test-results/sidepanel-general-light.png', Buffer.from((await command<{ data: string }>('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+  await click('Page unavailable', 'summary');
+  expect(await evaluate<boolean>('document.querySelector(".page-unavailable").open')).toBe(true);
+  expect(await evaluate<string>('document.querySelector(".page-unavailable p").innerText')).not.toBe('');
+  expect(requests.length).toBe(before + 3);
+  await click('Page unavailable', 'summary');
   await click('', 'textarea');
   await command('Input.insertText', { text: 'Say hello' });
   await click('Send question');
@@ -937,7 +1000,7 @@ test('Ask This Page extracts without selection, exposes request evidence and ref
   await cdp.detach(); await popup.close(); await page.close();
 });
 
-test('first model setup defaults to automatic selection on all sites after one permission grant', async () => {
+test('fresh installation enables all-site selection before model setup and preserves an opt-out', async () => {
   const onboardingProfile = await mkdtemp(path.join(tmpdir(), 'selio-onboarding-'));
   let onboarding: BrowserContext | undefined;
   try {
@@ -953,18 +1016,16 @@ test('first model setup defaults to automatic selection on all sites after one p
     const options = await onboarding.newPage();
     await options.goto(`chrome-extension://${id}/options.html`);
     await expect(options.getByRole('checkbox', { name: 'Enable automatic selection on all websites', exact: true })).toBeChecked();
-    expect(await onboardingWorker.evaluate(() => chrome.permissions.contains({ origins: ['http://*/*', 'https://*/*'] }))).toBe(false);
+    expect(await onboardingWorker.evaluate(() => chrome.permissions.contains({ origins: ['http://*/*', 'https://*/*'] }))).toBe(true);
+    await options.getByRole('button', { name: 'Privacy & access' }).click();
+    await expect(options.getByRole('checkbox', { name: 'Allow all websites', exact: true })).toBeChecked();
+    await options.screenshot({ animations: 'disabled', path: 'test-results/default-all-sites.png', fullPage: true });
+    await options.getByRole('button', { name: /^Models/ }).click();
     const alreadyOpen = await onboarding.newPage();
     await alreadyOpen.goto(origin + '/onboarding');
-    await expect(alreadyOpen.locator('selio-assistant')).toHaveCount(0);
-    const manager = await onboarding.newPage();
-    await manager.goto('chrome://extensions');
-    // Consent is granted through Chromium; the real Save model gesture still requests it.
-    await manager.evaluate(async id => {
-      const api = (chrome as unknown as { developerPrivate: { addHostPermission: (id: string, host: string) => Promise<void> } }).developerPrivate;
-      for (const host of ['http://*/*', 'https://*/*']) await api.addHostPermission(id, host);
-    }, id);
-    await manager.close();
+    await select(alreadyOpen);
+    const initialRequests = requests.length;
+    await expect(alreadyOpen.locator('selio-assistant')).toHaveCount(1);
     await choose(options, 'Provider', 'Custom');
     await options.getByLabel('Display name').fill('Setup model');
     await options.getByLabel('Base URL', { exact: true }).fill(`${origin}/v1`);
@@ -973,6 +1034,7 @@ test('first model setup defaults to automatic selection on all sites after one p
     const before = requests.length;
     await options.getByRole('button', { name: 'Save model', exact: true }).click();
     await expect(options.getByText('Model saved. Automatic selection is enabled on all websites.', { exact: true })).toBeVisible();
+    expect(before).toBe(initialRequests);
     expect(await onboardingWorker.evaluate(async () => ((await chrome.storage.local.get('settings')).settings as { preferences: { allSites: boolean; autoSelection: boolean } }).preferences)).toMatchObject({ allSites: true, autoSelection: true });
     await select(alreadyOpen);
     const anotherSite = await onboarding.newPage();
@@ -985,6 +1047,21 @@ test('first model setup defaults to automatic selection on all sites after one p
     await expect(options.getByRole('checkbox', { name: 'Allow all websites', exact: true })).not.toBeChecked();
     await expect.poll(() => onboardingWorker.evaluate(() => chrome.scripting.getRegisteredContentScripts())).toEqual([]);
     expect(await onboardingWorker.evaluate(async () => ((await chrome.storage.local.get('settings')).settings as { preferences: { allSites: boolean } }).preferences.allSites)).toBe(false);
+    await expect(alreadyOpen.getByRole('button', { name: 'Read selected text with Selio', exact: true })).not.toBeVisible();
+    await alreadyOpen.reload();
+    await expect(alreadyOpen.locator('selio-assistant')).toHaveCount(0);
+    expect(await onboardingWorker.evaluate(() => chrome.permissions.contains({ origins: ['http://*/*', 'https://*/*'] }))).toBe(true);
+    await options.reload();
+    await options.getByRole('button', { name: 'Privacy & access' }).click();
+    await expect(options.getByRole('checkbox', { name: 'Allow all websites', exact: true })).not.toBeChecked();
+    // A toolbar-style explicit injection must still work while global automation is off.
+    const injected = await options.evaluate(async articleUrl => {
+      const tab = (await chrome.tabs.query({})).find(tab => tab.url === articleUrl)!;
+      return chrome.runtime.sendMessage({ type: 'site:inject', payload: { tabId: tab.id } });
+    }, origin + '/onboarding');
+    expect(injected.ok).toBe(true);
+    await select(alreadyOpen);
+    expect(requests.length).toBe(before);
   } finally {
     try { await closeTestBrowser(onboarding, onboardingProfile); }
     finally { await rm(onboardingProfile, { recursive: true, force: true }); }

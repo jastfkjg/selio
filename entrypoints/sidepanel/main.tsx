@@ -84,7 +84,7 @@ function Panel() {
     return () => { disposed = true; chrome.tabs.onActivated.removeListener(activated); };
   }, []);
   return <div className="selio-root panel-shell" data-theme={theme} lang={preferences.uiLanguage}>
-    <nav className="panel-navigation" aria-label={t('侧边栏导航')}><button aria-pressed={view === 'chat'} onClick={() => setView('chat')}><MessageSquare size={15}/>{t('阅读助手')}</button><button aria-pressed={view === 'notes'} onClick={() => setView('notes')}><Bookmark size={15}/>{t('收藏笔记')}</button></nav>
+    <nav className="panel-navigation" aria-label={t('侧边栏导航')}><button aria-pressed={view === 'chat'} onClick={() => setView('chat')}><MessageSquare size={15} aria-hidden="true"/>{t('对话')}</button><button aria-pressed={view === 'notes'} onClick={() => setView('notes')}><Bookmark size={15} aria-hidden="true"/>{t('收藏笔记')}</button></nav>
     <div className="panel-chat-view" hidden={view !== 'chat'}>{tabId !== null ? <PanelChat key={tabId} tabId={tabId}/> : <div className="chat-empty"><p>{t("请打开一个网页，开始阅读。")}</p></div>}</div>
     {view === 'notes' && <NotesList language={preferences.uiLanguage}/>}
   </div>;

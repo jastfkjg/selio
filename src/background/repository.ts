@@ -3,7 +3,7 @@ import { validateModel, validatePreferences } from '../shared/validation';
 
 import { DEFAULT_ACTIONS, builtinAction, validateAction } from '../shared/actions';
 
-interface Saved { actions: PromptAction[]; preferences: Preferences; models: ModelConfig[]; defaultModelId: string | null }
+interface Saved { actionOrderVersion?: number; actions: PromptAction[]; preferences: Preferences; models: ModelConfig[]; defaultModelId: string | null }
 let ready: Promise<void> | undefined;
 export function protectStorage(): Promise<void> {
   return ready ??= Promise.all([
@@ -39,7 +39,15 @@ export async function readSaved(): Promise<Saved> {
   const saved = (settings as Saved | undefined) ?? { models: [], defaultModelId: null };
   const actions = ('actions' in saved ? saved.actions : undefined) ?? structuredClone(DEFAULT_ACTIONS);
   const missing = DEFAULT_ACTIONS.filter(action => !actions.some(savedAction => savedAction.id === action.id));
-  return { ...saved, actions: [...actions, ...structuredClone(missing)], preferences: { ...DEFAULT_PREFERENCES, ...('preferences' in saved ? saved.preferences : {}) } };
+  const ordered = [...actions, ...structuredClone(missing)];
+  const preferences = { ...DEFAULT_PREFERENCES, ...('preferences' in saved ? saved.preferences : {}) };
+  // Preserve the old explicit default once, then let the saved order own it.
+  if (!('actionOrderVersion' in saved) || saved.actionOrderVersion !== 1) {
+    const index = ordered.findIndex(action => action.id === preferences.action && action.showInQuickActions);
+    if (index > 0) ordered.unshift(...ordered.splice(index, 1));
+  }
+  preferences.action = (ordered.find(action => action.showInQuickActions) ?? ordered.find(action => action.id === preferences.action) ?? ordered[0]!).id;
+  return { ...saved, actionOrderVersion: 1, actions: ordered, preferences };
 }
 export async function readKey(model: ModelConfig): Promise<string> {
   await protectStorage();
@@ -57,13 +65,14 @@ export function mutateSettings(fn: (saved: Saved) => Promise<void | SettingsComm
   const operation = writes.then(async () => {
     const saved = await readSaved();
     const commit = await fn(saved);
+    saved.preferences.action = (saved.actions.find(action => action.showInQuickActions) ?? saved.actions.find(action => action.id === saved.preferences.action) ?? saved.actions[0]!).id;
     await chrome.storage.local.set({ ...commit?.localValues, settings: saved });
     await commit?.afterCommit?.();
   });
   writes = operation.catch(() => undefined);
   return operation;
 }
-export async function saveModel(raw: ModelConfig, key?: string, enableAllSites = false): Promise<void> {
+export async function saveModel(raw: ModelConfig, key?: string, enableAllSites?: boolean): Promise<void> {
   const model = validateModel(raw);
   if (key !== undefined && (typeof key !== 'string' || key.length > 4096 || /[\r\n]/.test(key))) throw new Error('API Key 格式无效。');
   await mutateSettings(async saved => {
@@ -81,9 +90,9 @@ export async function saveModel(raw: ModelConfig, key?: string, enableAllSites =
     const other = model.keyStorage === 'local' ? chrome.storage.session : chrome.storage.local;
     saved.models = [...saved.models.filter(m => m.id !== model.id), model];
     saved.defaultModelId ??= model.id;
-    if (enableAllSites) {
-      saved.preferences.allSites = true;
-      saved.preferences.autoSelection = true;
+    if (enableAllSites !== undefined) {
+      saved.preferences.allSites = enableAllSites;
+      if (enableAllSites) saved.preferences.autoSelection = true;
     }
     return {
       localValues: model.keyStorage === 'local' ? { [keyName]: secret } : undefined,
@@ -99,6 +108,11 @@ export const deleteModel = (id: string) => mutateSettings(async saved => {
 });
 export const savePreferences = (preferences: Preferences) => mutateSettings(async saved => {
   if (!saved.actions.some(action => action.id === preferences.action)) throw new Error('操作模板不存在。');
+  if (preferences.action !== saved.preferences.action) {
+    const index = saved.actions.findIndex(action => action.id === preferences.action && action.showInQuickActions);
+    if (index < 0) throw new Error('请先启用此操作。');
+    saved.actions.unshift(...saved.actions.splice(index, 1));
+  }
   saved.preferences = { ...validatePreferences(preferences), grantedSites: saved.preferences.grantedSites, allSites: saved.preferences.allSites };
 });
 export const setDefault = (id: string) => mutateSettings(async saved => {
@@ -117,4 +131,8 @@ export const deleteAction = (id: Action) => mutateSettings(async saved => {
   if (builtinAction(id)) throw new Error('内置操作可隐藏，不能删除。');
   saved.actions = saved.actions.filter(action => action.id !== id);
   if (saved.preferences.action === id) saved.preferences.action = (saved.actions.find(a => a.showInQuickActions) ?? saved.actions[0]!).id;
+});
+export const reorderActions = (ids: unknown) => mutateSettings(async saved => {
+  if (!Array.isArray(ids) || ids.length !== saved.actions.length || new Set(ids).size !== ids.length || ids.some(id => !saved.actions.some(action => action.id === id))) throw new Error('操作列表已变化，请刷新后重试。');
+  saved.actions = ids.map(id => saved.actions.find(action => action.id === id)!);
 });

@@ -5,11 +5,11 @@ import { Check, ChevronDown } from 'lucide-react';
 
 type Option = { value: string; label: string; content?: ReactNode; disabled?: boolean };
 type Props = Omit<SelectHTMLAttributes<HTMLSelectElement>, 'onChange' | 'value' | 'size'> & {
-  value: string; options?: Option[]; variant?: 'provider';
+  value: string; options?: Option[]; variant?: 'provider'; selectedContent?: ReactNode;
   onChange?: (event: { target: { value: string }; nativeEvent: { isTrusted: boolean } }) => void;
 };
 /** Shared select surface, portalled inside the extension root (including Shadow DOM). */
-export function Select({ value, options: supplied, children, onChange, variant, ...props }: Props) {
+export function Select({ value, options: supplied, children, onChange, variant, selectedContent, ...props }: Props) {
   const generated = useId(), id = props.id ?? generated;
   const options: Option[] = supplied ?? Children.toArray(children).flatMap(child => {
     if (!isValidElement<{ value?: string; children?: ReactNode; disabled?: boolean }>(child)) return [];
@@ -64,7 +64,7 @@ export function Select({ value, options: supplied, children, onChange, variant, 
           setActive(index);
         } else if (open && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); choose(active, e.isTrusted); }
         else if (e.key.length === 1 && e.key !== ' ') { const index = options.findIndex(o => !o.disabled && o.label.toLocaleLowerCase().startsWith(e.key.toLocaleLowerCase())); if (index >= 0) { e.preventDefault(); setOpen(true); setActive(index); } }
-      }}>{current?.content ?? <span>{current?.label ?? value}</span>}<ChevronDown size={14} className={open ? 'rotate' : ''}/></button>
+      }}>{selectedContent ?? current?.content ?? <span>{current?.label ?? value}</span>}<ChevronDown size={14} className={open ? 'rotate' : ''}/></button>
     {open && portal && createPortal(<div ref={menu} id={`${id}-list`} role="listbox" aria-label={props['aria-label']} aria-labelledby={props['aria-label'] ? undefined : id} className={`select-menu ${variant === 'provider' ? 'provider-menu' : ''}`} style={{ visibility: 'hidden' }}>
       {options.map((option, index) => <div key={option.value} id={`${id}-option-${index}`} role="option" aria-label={option.label} aria-selected={option.value === value} aria-disabled={option.disabled || undefined} className={`select-option ${variant === 'provider' ? 'provider-option' : ''} ${active === index ? 'highlighted' : ''}`} onPointerMove={() => { if (!option.disabled) setActive(index); }} onPointerDown={e => e.preventDefault()} onClick={e => choose(index, e.isTrusted)}>{option.content ?? <span>{option.label}</span>}<Check size={14} className={option.value === value ? '' : 'select-check-hidden'}/></div>)}
     </div>, portal)}

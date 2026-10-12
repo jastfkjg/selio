@@ -1,4 +1,4 @@
-import type { Action, ActionIcon, PromptAction } from './types';
+import type { Action, ActionIcon, PromptAction, PublicAction } from './types';
 import type { Translator } from './i18n';
 
 export const ACTION_ICONS: ActionIcon[] = ['Languages', 'ListFilter', 'Sparkles', 'Code', 'Pencil', 'BookOpen', 'Table', 'Search', 'MessageSquare', 'Lightbulb'];
@@ -10,6 +10,11 @@ export const DEFAULT_ACTIONS: PromptAction[] = [
 ];
 export const isActionId = (value: unknown): value is Action => typeof value === 'string' && (DEFAULT_ACTIONS.some(a => a.id === value) || /^custom:[\w-]{1,80}$/.test(value));
 export const builtinAction = (id: Action) => DEFAULT_ACTIONS.find(a => a.id === id);
+/** Keep enabled actions in the user's order; only the first three are tabs. */
+export function actionNavigation<T extends PublicAction>(actions: T[]) {
+  const enabled = actions.filter(action => action.showInQuickActions);
+  return { quick: enabled.slice(0, 3), more: enabled.slice(3), defaultAction: enabled[0] };
+}
 export function actionLabel(action: Pick<PromptAction, 'id' | 'name'>, t: Translator): string {
   return builtinAction(action.id)?.name === action.name ? t(action.name) : action.name;
 }

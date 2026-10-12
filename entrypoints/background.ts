@@ -1,7 +1,7 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { ConversationEngine } from '../src/background/conversations';
 import { clearNotes, deleteNote, readNotes, saveAnswer, updateNote } from '../src/background/notes';
-import { deleteAction, saveAction, deleteModel, mutateSettings, protectStorage, readKey, readSaved, saveModel, savePreferences, setDefault, settingsView } from '../src/background/repository';
+import { deleteAction, reorderActions, saveAction, deleteModel, mutateSettings, protectStorage, readKey, readSaved, saveModel, savePreferences, setDefault, settingsView } from '../src/background/repository';
 import { translator } from '../src/shared/i18n';
 import { clearUsage, readUsage, recoverUsage, trackedStream } from '../src/background/usage';
 import { ApiError, errorMessage } from '../src/llm/errors';
@@ -90,7 +90,7 @@ export default defineBackground(() => {
       for (const tab of tabs) {
         if (tab.id === undefined) continue;
         void chrome.tabs.sendMessage(tab.id, { type: 'selio:preferences', preferences: saved.preferences }).catch(() => undefined);
-        // Registration covers future documents. Reconnect already-open, explicitly granted tabs too.
+        // Registration covers future documents. Reconnect already-open, enabled tabs too.
         if (tab.url && matches.some(pattern => matchesSitePattern(pattern, tab.url!)) && !siteDisabled(new URL(tab.url).hostname, saved.preferences.disabledSites)) {
           void chrome.tabs.sendMessage(tab.id, { type: 'selio:selection-ready' }, { frameId: 0 }).then(reply => {
             if (reply !== true) throw new Error('No selection listener');
@@ -191,6 +191,7 @@ export default defineBackground(() => {
     const selection: SelectionSnapshot = { text: info.selectionText.slice(0, 12000), rect: { x: 20, y: 20, width: 0, height: 0 }, pageTitle: tab.title ?? '', pageUrl: info.pageUrl ?? tab.url };
     void ready.then(async () => {
       const settings = await readSaved();
+      if (!settings.actions.some(action => action.showInQuickActions)) return;
       engine.start(tabId, selection, { ...settings.preferences, scope: 'selection' }, settings.defaultModelId, engine.get(tabId)?.id, settings.actions.find(a => a.id === settings.preferences.action));
     });
   });
@@ -229,6 +230,7 @@ export default defineBackground(() => {
           case 'start': {
             if (!command.selection) throw new Error('请先选中文字。');
             const saved = await readSaved();
+            if (!saved.actions.some(action => action.showInQuickActions)) throw new Error('请先启用至少一个操作。');
             engine.start(tabId, command.selection, saved.preferences, saved.defaultModelId, command.conversationId, saved.actions.find(a => a.id === saved.preferences.action));
             break;
           }
@@ -252,6 +254,7 @@ export default defineBackground(() => {
             const saved = await readSaved();
             const template = saved.actions.find(a => a.id === command.action);
             if (!template) throw new Error('操作模板不存在。');
+            if (!template.showInQuickActions) throw new Error('请先启用此操作。');
             engine.change(tabId, command.conversationId, command.action, undefined, undefined, template);
             break;
           }
@@ -318,12 +321,13 @@ export default defineBackground(() => {
         case 'usage:get': return readUsage();
         case 'usage:clear': await clearUsage(); return [];
         case 'settings:get': return settingsView();
+        case 'actions:reorder': await reorderActions(p); break;
         case 'actions:save': await saveAction(p); break;
         case 'actions:delete': if (!isAction(p)) throw new Error('操作模板无效。'); await deleteAction(p); break;
         case 'settings:model': {
           if (p?.enableAllSites !== undefined && typeof p.enableAllSites !== 'boolean') throw new Error('偏好设置无效。');
           if (p?.enableAllSites && !await chrome.permissions.contains({ origins: ALL_SITES })) throw new Error('网站权限尚未授予。');
-          await saveModel(p?.model, p?.key, p?.enableAllSites === true);
+          await saveModel(p?.model, p?.key, p?.enableAllSites);
           break;
         }
         case 'settings:delete': if (typeof p !== 'string') throw new Error('模型无效。'); await deleteModel(p); break;
@@ -351,7 +355,7 @@ export default defineBackground(() => {
           if (typeof p !== 'boolean') throw new Error('偏好设置无效。');
           if (p && !await chrome.permissions.contains({ origins: ALL_SITES })) throw new Error('网站权限尚未授予。');
           await mutateSettings(async saved => { saved.preferences.allSites = p; });
-          if (!p) await chrome.permissions.remove({ origins: ALL_SITES });
+          // Required host permissions stay granted; syncScripts applies the selection preference.
           break;
         }
         case 'site:toggle': {
@@ -380,7 +384,13 @@ export default defineBackground(() => {
           const saved = await readSaved();
           if (!saved.preferences.grantedSites.includes(p)) throw new Error('网站不存在。');
           await mutateSettings(async s => { s.preferences.grantedSites = s.preferences.grantedSites.filter(site => site !== p); });
-          await chrome.permissions.remove({ origins: [p] });
+          if (!saved.preferences.allSites) {
+            for (const tab of await chrome.tabs.query({})) {
+              if (tab.id !== undefined && tab.url && matchesSitePattern(p, tab.url)) {
+                void chrome.tabs.sendMessage(tab.id, { type: 'selio:revoked', origins: [p] }).catch(() => undefined);
+              }
+            }
+          }
           break;
         }
         case 'site:inject': {
@@ -400,8 +410,6 @@ export default defineBackground(() => {
           await clearNotes();
           await chrome.storage.local.clear(); await chrome.storage.session.clear();
           await chrome.storage.local.set({ keyStorageVersion: 2 });
-          const permissions = await chrome.permissions.getAll();
-          if (permissions.origins?.length) await chrome.permissions.remove({ origins: permissions.origins });
           for (const port of ports.keys()) post(port, { type: 'state', conversation: null });
           break;
         }

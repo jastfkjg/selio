@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ACTIONS, actionLabel, builtinAction, resolvePrompt, validateAction, validatePrompt } from '../src/shared/actions';
+import { DEFAULT_ACTIONS, actionLabel, actionNavigation, builtinAction, resolvePrompt, validateAction, validatePrompt } from '../src/shared/actions';
 import { translator } from '../src/shared/i18n';
 import { buildMessages } from '../src/llm/prompts';
 import type { Conversation, PromptAction } from '../src/shared/types';
@@ -41,5 +41,20 @@ describe('prompt templates', () => {
     expect(ask).toMatchObject({ icon: 'MessageSquare', execution: 'ask', showInQuickActions: true });
     for (const execution of ['direct', 'edit'] as const) expect(() => validateAction({ ...ask, execution })).toThrow('发送消息');
     expect(() => validateAction({ ...template, execution: 'ask' })).toThrow('发送消息');
+  });
+});
+
+
+describe('action navigation', () => {
+  it('shows the first three enabled actions as tabs and the remainder in order in More', () => {
+    const actions = [DEFAULT_ACTIONS[3]!, { ...DEFAULT_ACTIONS[0]!, showInQuickActions: false }, template, DEFAULT_ACTIONS[1]!, DEFAULT_ACTIONS[2]!];
+    const navigation = actionNavigation(actions);
+    expect(navigation.quick.map(action => action.id)).toEqual(['ask', template.id, 'summarize']);
+    expect(navigation.more.map(action => action.id)).toEqual(['explain']);
+    expect(navigation.defaultAction?.id).toBe('ask');
+  });
+  it('has no overflow with at most three enabled actions and no default when all are disabled', () => {
+    expect(actionNavigation(DEFAULT_ACTIONS.slice(0, 3)).more).toEqual([]);
+    expect(actionNavigation(DEFAULT_ACTIONS.map(action => ({ ...action, showInQuickActions: false })))).toEqual({ quick: [], more: [], defaultAction: undefined });
   });
 });

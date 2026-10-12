@@ -3,6 +3,7 @@ export type Action = BuiltinAction | `custom:${string}`;
 export type ActionIcon = 'Languages' | 'ListFilter' | 'Sparkles' | 'Code' | 'Pencil' | 'BookOpen' | 'Table' | 'Search' | 'MessageSquare' | 'Lightbulb';
 export interface PromptAction {
   id: Action; name: string; icon: ActionIcon; prompt: string; modelId: string | null;
+  /** Persisted legacy name; false disables the action in both tabs and More. */
   showInQuickActions: boolean; execution: 'direct' | 'edit' | 'ask';
 }
 export type PublicAction = Omit<PromptAction, 'prompt'>;
@@ -22,7 +23,7 @@ export interface Preferences {
   grantedSites: string[];
 }
 export const DEFAULT_PREFERENCES: Preferences = {
-  uiLanguage: 'en', action: 'translate', language: '简体中文', theme: 'system', autoSelection: true, allSites: false,
+  uiLanguage: 'en', action: 'translate', language: '简体中文', theme: 'system', autoSelection: true, allSites: true,
   scope: 'selection', disabledSites: [], grantedSites: [],
 };
 export const ACTIONS: Record<BuiltinAction, string> = { translate: '翻译', summarize: '总结', explain: '解释', ask: '询问 AI' };

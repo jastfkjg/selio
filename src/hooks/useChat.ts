@@ -4,7 +4,8 @@ import { DEFAULT_PREFERENCES, type ChatCommand, type Conversation, type Preferen
 
 export function useChat(tabId?: number) {
   const [conversation, setConversation] = useState<Conversation | null>(null);
-  const [preferences, setPreferences] = useState<Preferences>(DEFAULT_PREFERENCES);
+  // All-site access is unknown until the background sends the saved settings.
+  const [preferences, setPreferences] = useState<Preferences>({ ...DEFAULT_PREFERENCES, allSites: false });
   const [actions, setActions] = useState<PublicAction[]>(DEFAULT_ACTIONS);
   const [models, setModels] = useState<PublicModel[]>([]);
   const [modelName, setModelName] = useState('未配置模型');

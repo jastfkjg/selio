@@ -84,7 +84,7 @@ it('migrates actions, persists per-template controls, and repairs references aft
   await repo.saveModel(config, 'SECRET');
   const action = { id: 'custom:tech' as const, name: 'Technical', icon: 'Code' as const, prompt: 'Explain {{selection}}', modelId: config.id, execution: 'edit' as const, showInQuickActions: false };
   await repo.saveAction(action);
-  await repo.savePreferences({ ...initial.preferences, action: action.id });
+  await expect(repo.savePreferences({ ...initial.preferences, action: action.id })).rejects.toThrow('请先启用');
   vi.resetModules(); const recovered = await import('../src/background/repository');
   expect((await recovered.settingsView()).actions.at(-1)).toEqual(action);
   await recovered.deleteModel(config.id);
@@ -108,14 +108,14 @@ it('adds Ask AI to existing actions without resetting edits, visibility, order o
   expect(upgraded.actions.at(-1)).toMatchObject({ id: 'ask', execution: 'ask' });
   expect(upgraded.preferences.action).toBe(custom.id);
   await repo.saveAction({ ...upgraded.actions.at(-1)!, showInQuickActions: false });
-  await repo.savePreferences({ ...upgraded.preferences, action: 'ask' });
+  await expect(repo.savePreferences({ ...upgraded.preferences, action: 'ask' })).rejects.toThrow('请先启用');
   vi.resetModules();
   const recovered = await import('../src/background/repository');
   const view = await recovered.settingsView();
   expect(view.actions.filter(action => action.id === 'ask')).toHaveLength(1);
   expect(view.actions.at(-1)).toMatchObject({ id: 'ask', execution: 'ask', showInQuickActions: false });
   expect(view.actions.slice(0, actions.length)).toEqual(actions);
-  expect(view.preferences.action).toBe('ask');
+  expect(view.preferences.action).toBe(custom.id);
   await expect(recovered.deleteAction('ask')).rejects.toThrow('不能删除');
 });
 
@@ -154,8 +154,67 @@ it('commits first-model all-site selection with model settings and retains it af
   await recovered.saveModel({ ...config, name: 'Renamed', keyStorage: 'local' });
   expect((await recovered.settingsView()).preferences.allSites).toBe(true);
 });
-it('keeps per-site defaults when first-model all-site selection is unchecked', async () => {
+it('defaults to all-site selection before configuring a model', async () => {
   const repo = await import('../src/background/repository');
-  await repo.saveModel(config, 'SECRET');
+  expect((await repo.settingsView()).preferences).toMatchObject({ allSites: true, autoSelection: true });
+});
+it('preserves an explicit all-site opt-out through model edits and restarts', async () => {
+  const repo = await import('../src/background/repository');
+  await repo.saveModel(config, 'SECRET', false);
   expect((await repo.settingsView()).preferences).toMatchObject({ allSites: false, autoSelection: true });
+  vi.resetModules();
+  const recovered = await import('../src/background/repository');
+  await recovered.saveModel({ ...config, name: 'Renamed', keyStorage: 'local' });
+  expect((await recovered.settingsView()).preferences.allSites).toBe(false);
+});
+
+
+it('preserves the legacy enabled default at the front, then persists user order and derives the default', async () => {
+  local.data.settings = { preferences: { ...DEFAULT_PREFERENCES, action: 'ask' }, actions: structuredClone(DEFAULT_ACTIONS), models: [], defaultModelId: null };
+  const repo = await import('../src/background/repository');
+  expect((await repo.settingsView()).actions.map(action => action.id)).toEqual(['ask', 'translate', 'summarize', 'explain']);
+  await repo.reorderActions(['summarize', 'ask', 'translate', 'explain']);
+  await repo.saveAction({ ...DEFAULT_ACTIONS[1]!, showInQuickActions: false });
+  vi.resetModules();
+  const recovered = await import('../src/background/repository');
+  const view = await recovered.settingsView();
+  expect(view.actions.map(action => action.id)).toEqual(['summarize', 'ask', 'translate', 'explain']);
+  expect(view.preferences.action).toBe('ask');
+  await recovered.saveAction({ ...view.actions[0]!, showInQuickActions: true });
+  expect((await recovered.settingsView()).preferences.action).toBe('summarize');
+  await recovered.savePreferences({ ...view.preferences, action: 'explain' });
+  expect((await recovered.settingsView()).actions.map(action => action.id)).toEqual(['explain', 'summarize', 'ask', 'translate']);
+});
+
+it('rejects incomplete, duplicate or stale reorder requests without losing actions', async () => {
+  const repo = await import('../src/background/repository');
+  const before = await repo.settingsView();
+  for (const ids of [null, ['ask'], ['ask', 'ask', 'explain', 'translate'], ['ask', 'summarize', 'explain', 'custom:missing']]) {
+    await expect(repo.reorderActions(ids)).rejects.toThrow('操作列表已变化');
+    expect((await repo.settingsView()).actions).toEqual(before.actions);
+  }
+});
+
+it('never re-enables disabled actions, including a legacy disabled default and an entirely disabled list', async () => {
+  const actions = DEFAULT_ACTIONS.map(action => ({ ...action, showInQuickActions: action.id === 'summarize' }));
+  local.data.settings = { preferences: { ...DEFAULT_PREFERENCES, action: 'ask' }, actions, models: [], defaultModelId: null };
+  const repo = await import('../src/background/repository');
+  expect((await repo.settingsView()).preferences.action).toBe('summarize');
+  await repo.saveAction({ ...actions[1]!, showInQuickActions: false });
+  const view = await repo.settingsView();
+  expect(view.actions.every(action => !action.showInQuickActions)).toBe(true);
+  await repo.savePreferences({ ...view.preferences, theme: 'dark' });
+  await repo.reorderActions(['ask', 'explain', 'summarize', 'translate']);
+  expect((await repo.settingsView()).actions.every(action => !action.showInQuickActions)).toBe(true);
+  await repo.saveAction({ ...actions[3]!, showInQuickActions: true });
+  expect((await repo.settingsView()).preferences.action).toBe('ask');
+});
+
+it('deleting the first custom action chooses the next enabled action', async () => {
+  const repo = await import('../src/background/repository');
+  await repo.saveAction({ ...DEFAULT_ACTIONS[0]!, id: 'custom:first' });
+  await repo.reorderActions(['custom:first', 'ask', 'translate', 'summarize', 'explain']);
+  expect((await repo.settingsView()).preferences.action).toBe('custom:first');
+  await repo.deleteAction('custom:first');
+  expect((await repo.settingsView()).preferences.action).toBe('ask');
 });

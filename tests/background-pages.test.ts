@@ -76,7 +76,9 @@ afterEach(() => vi.unstubAllGlobals());
 
 it('does not enable all-site selection from model setup until Chrome grants access', async () => {
   const app = await setup();
-  const saved = (await app.mock.storage.local.get('settings')).settings as { models: import('../src/shared/types').ModelConfig[] };
+  const saved = (await app.mock.storage.local.get('settings')).settings as { models: import('../src/shared/types').ModelConfig[]; preferences: { allSites: boolean } };
+  saved.preferences.allSites = false;
+  await app.mock.storage.local.set({ settings: saved });
   app.mock.permissions.contains.mockResolvedValue(false);
   expect(await app.rpc('settings:model', { model: saved.models[0], enableAllSites: true })).toEqual({ ok: false, error: '网站权限尚未授予。' });
   expect(((await app.mock.storage.local.get('settings')).settings as { preferences: { allSites: boolean } }).preferences.allSites).toBe(false);
@@ -182,4 +184,20 @@ it.each([false, true])('discards extraction results after navigation (success: %
   expect(app.state()?.pageError).toBeUndefined();
   expect(app.state()?.page).toBeUndefined();
   expect(app.errors()).toHaveLength(0);
+});
+
+it('rejects disabled actions and does not start a hidden default when all actions are disabled', async () => {
+  const initial = selectionChat();
+  const app = await setup(initial);
+  const repo = await import('../src/background/repository');
+  await repo.saveAction({ ...DEFAULT_ACTIONS[1]!, showInQuickActions: false });
+  app.send({ type: 'action', action: 'summarize', conversationId: initial.id });
+  await vi.waitFor(() => expect(app.errors().at(-1)?.[0]).toEqual({ type: 'error', error: '请先启用此操作。' }));
+  expect(app.state()).toEqual(initial);
+  for (const action of DEFAULT_ACTIONS) await repo.saveAction({ ...action, showInQuickActions: false });
+  app.send({ type: 'start', selection: { ...initial.selection, text: 'New selection' } });
+  await vi.waitFor(() => expect(app.errors().at(-1)?.[0]).toEqual({ type: 'error', error: '请先启用至少一个操作。' }));
+  expect(app.state()).toEqual(initial);
+  const { trackedStream } = await import('../src/background/usage');
+  expect(trackedStream).not.toHaveBeenCalled();
 });

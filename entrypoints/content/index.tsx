@@ -16,6 +16,7 @@ import type { SelectionSnapshot } from '../../src/shared/types';
 
 function App({ host }: { host: HTMLElement }) {
   const session = useChat();
+  const hasEnabledActions = session.actions.some(action => action.showInQuickActions);
   const t = translator(session.preferences.uiLanguage);
   const theme = useTheme(session.preferences.theme);
   const [selection, setSelection] = useState<SelectionSnapshot | null>(null);
@@ -118,7 +119,7 @@ function App({ host }: { host: HTMLElement }) {
     if (floating.current) observer.observe(floating.current);
     window.addEventListener('scroll', position, true); window.addEventListener('resize', position);
     return () => { observer.disconnect(); window.removeEventListener('scroll', position, true); window.removeEventListener('resize', position); };
-  }, [selection, open, anchor, placement]);
+  }, [selection, open, anchor, placement, hasEnabledActions, session.connected, access]);
   const start = (snapshot: SelectionSnapshot, selectedRange: Range | null) => {
     chatRange.current = selectedRange;
     const source = { ...snapshot };
@@ -128,7 +129,7 @@ function App({ host }: { host: HTMLElement }) {
   };
   const launch = (hover = false) => {
     cancelHover();
-    if (!selection || !session.connected || accessRevoked.current || !session.preferences.autoSelection || siteDisabled(location.hostname, session.preferences.disabledSites)) return;
+    if (!selection || !session.connected || !hasEnabledActions || accessRevoked.current || !session.preferences.autoSelection || siteDisabled(location.hostname, session.preferences.disabledSites)) return;
     hoverOpened.current = hover;
     setPlacement(hover ? 'right-start' : 'bottom-end');
     if (hover) controls.current.manual.current = false;
@@ -138,13 +139,12 @@ function App({ host }: { host: HTMLElement }) {
   };
 
   return <div className="selio-root overlay" data-theme={theme}>
-    {access && selection && session.connected && <button ref={icon} className="selection-launcher" aria-label={t("用 Selio 阅读选中文字")} title={`Selio · ${selection.text.slice(0, 60)}`} onPointerEnter={e => { if (e.isTrusted && e.pointerType !== 'touch') { cancelHover(); hoverTimer.current = setTimeout(() => launch(true), 800); } }} onPointerLeave={cancelHover} onPointerCancel={cancelHover} onPointerDown={e => { cancelHover(); e.preventDefault(); }} onClick={e => { if (e.isTrusted) launch(); }}><Mark size={24}/></button>}
+    {access && selection && session.connected && hasEnabledActions && <button ref={icon} className="selection-launcher" aria-label={t("用 Selio 阅读选中文字")} title={`Selio · ${selection.text.slice(0, 60)}`} onPointerEnter={e => { if (e.isTrusted && e.pointerType !== 'touch') { cancelHover(); hoverTimer.current = setTimeout(() => launch(true), 800); } }} onPointerLeave={cancelHover} onPointerCancel={cancelHover} onPointerDown={e => { cancelHover(); e.preventDefault(); }} onClick={e => { if (e.isTrusted) launch(); }}><Mark size={24}/></button>}
     {open && <div ref={floating} tabIndex={-1} className="floating-container" onPointerMove={windowControls.move} onPointerUp={windowControls.end} onPointerCancel={windowControls.end} onLostPointerCapture={windowControls.end} role="dialog" aria-modal="false" aria-label={t("Selio 对话")} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } }}><Chat windowControls={windowControls} session={session} onClose={() => setOpen(false)} onPin={() => void rpc('chat:pin').then(() => setOpen(false), e => session.setError(e.message))}/><button className="resize-corner" aria-label={t('调整浮窗大小')} title={t('拖动调整大小，或使用方向键')} onPointerDown={e => windowControls.start(e, 'resize')} onKeyDown={e => windowControls.keyboard(e, true)}><span/></button><div className="resize-edge resize-right" onPointerDown={e => windowControls.start(e, 'width')}/><div className="resize-edge resize-bottom" onPointerDown={e => windowControls.start(e, 'height')}/></div>}
   </div>;
 }
 export default defineContentScript({
-  // Runtime registration supplies matches only after an explicit site grant.
-  // Declaring matches here would make WXT generate permanent host permissions.
+  // Runtime registration follows all-site, per-site and automatic selection preferences.
   registration: 'runtime', cssInjectionMode: 'manual',
   main(ctx) {
     const instance = globalThis as typeof globalThis & { __selioMounted?: boolean };
