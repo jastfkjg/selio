@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Selio privacy policy: what the Chrome extension reads, sends to your chosen AI service, stores on your device, and how to delete it.">
+  <meta name="color-scheme" content="light">
+  <title>Selio — Privacy Policy / 隐私政策</title>
+  <style>
+    :root { --bg:#f7f8f3; --surface:#fff; --text:#26352e; --muted:#59685f; --line:#dce3d7; --accent:#2e6349; --soft:#eaf0e5; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; scroll-padding-top:24px; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; font-size:16px; line-height:1.8; -webkit-text-size-adjust:100%; }
+    a { color:var(--accent); text-underline-offset:4px; overflow-wrap:anywhere; }
+    a:hover { text-decoration-thickness:2px; }
+    a:focus-visible { outline:3px solid var(--accent); outline-offset:4px; border-radius:2px; }
+    [hidden] { display:none !important; }
+    .skip-link { position:absolute; left:24px; top:-80px; background:var(--surface); padding:10px 16px; z-index:10; }
+    .skip-link:focus { top:16px; }
+    .site-header { max-width:1100px; margin:0 auto; padding:36px 32px 26px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:24px; }
+    .brand { display:flex; align-items:center; gap:11px; font-size:32px; line-height:1; font-weight:650; letter-spacing:-1.5px; text-decoration:none; color:var(--text); }
+    .brand-dot { color:var(--accent); }
+    .languages { display:flex; gap:8px; flex-wrap:wrap; }
+    .languages a { display:flex; align-items:center; justify-content:center; min-height:44px; padding:7px 14px; font-size:14px; border-radius:7px; text-decoration:none; transition:background-color 160ms ease; }
+    .languages a:hover, .languages a[aria-current="true"] { background:var(--soft); }
+    .policy-layout { max-width:1100px; margin:0 auto; padding:52px 32px 80px; display:grid; grid-template-columns:195px minmax(0,1fr); gap:65px; }
+    .contents { align-self:start; position:sticky; top:28px; }
+    .contents-title { margin:0 0 15px; font-size:12px; font-weight:600; letter-spacing:1.7px; text-transform:uppercase; color:var(--muted); }
+    .contents a { display:block; min-height:44px; padding:8px 0; line-height:1.6; font-size:14px; color:var(--muted); text-decoration:none; }
+    .contents a:hover { color:var(--accent); text-decoration:underline; }
+    .document { min-width:0; }
+    .eyebrow { margin:0 0 12px; font-size:12px; font-weight:600; letter-spacing:2px; color:var(--accent); text-transform:uppercase; }
+    h1 { margin:0 0 18px; font-size:clamp(36px,5vw,52px); line-height:1.15; font-weight:600; letter-spacing:-1.7px; }
+    .updated { margin:0 0 25px; color:var(--muted); font-size:14px; }
+    .lead { margin:0; font-size:18px; line-height:1.8; }
+    .overview { margin:28px 0 0; padding:18px 0 18px 22px; border-left:3px solid var(--accent); color:var(--muted); }
+    .overview strong { color:var(--text); }
+    section { margin-top:40px; padding-top:29px; border-top:1px solid var(--line); }
+    h2 { margin:0 0 16px; font-size:23px; line-height:1.4; font-weight:600; letter-spacing:-.4px; }
+    h3 { margin:24px 0 8px; font-size:17px; font-weight:600; }
+    p { margin:12px 0; }
+    ul,ol { padding-left:24px; margin:12px 0; }
+    li { padding-left:2px; margin:9px 0; }
+    .facts { margin:20px 0 0; }
+    .facts > div { display:grid; grid-template-columns:150px minmax(0,1fr); gap:22px; padding:18px 0; border-top:1px solid var(--line); }
+    .facts dt { font-weight:600; line-height:1.6; }
+    .facts dd { margin:0; line-height:1.8; }
+    .contact { font-style:normal; margin-top:20px; }
+    .page-footer { max-width:1100px; margin:0 auto; padding:25px 32px 36px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+    .noscript-note { max-width:1036px; margin:24px auto 0; padding:0 24px; color:var(--muted); }
+    @media (max-width:850px) { .policy-layout { grid-template-columns:150px minmax(0,1fr); gap:32px; } .facts > div { grid-template-columns:125px minmax(0,1fr); gap:16px; } }
+    @media (max-width:640px) { .site-header { margin:0 22px; padding:27px 0 20px; gap:12px; } .brand { font-size:29px; } .languages { gap:2px; } .languages a { padding:7px 11px; } .policy-layout { padding:32px 24px 52px; grid-template-columns:minmax(0,1fr); gap:30px; } .contents { position:static; border-bottom:1px solid var(--line); padding-bottom:22px; } .contents-links { display:grid; grid-template-columns:1fr 1fr; column-gap:20px; } .contents-title { margin-bottom:8px; } .contents a { font-size:13px; } .facts > div { grid-template-columns:minmax(0,1fr); gap:6px; } h1 { font-size:38px; } h2 { font-size:22px; } .lead { font-size:17px; } .page-footer { margin:0 24px; padding:24px 0; } }
+    @media (prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } .languages a { transition:none; } }
+    @media print { body { background:#fff; font-size:11pt; } .site-header { padding-top:0; } .languages,.contents,.skip-link { display:none; } .policy-layout { display:block; padding:24px 0; } section { break-inside:avoid; } .page-footer { padding-bottom:0; } }
+  </style>
+</head>
+<body>
+  <!-- Publisher contact: zilong / zhou.zilong@qq.com. Update both language versions together. -->
+  <a class="skip-link" href="#main-en">Skip to policy / 跳转到隐私政策</a>
+  <header class="site-header">
+    <a class="brand" href="#english" aria-label="Selio privacy policy">
+      <svg width="34" height="34" viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect width="32" height="32" rx="10" fill="#2e6349"/><path d="M22 9.5H14.5C11.5 9.5 10 11 10 13s1.5 3 4.5 3h3c3 0 4.5 1 4.5 3s-1.5 3.5-4.5 3.5H10" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/><path d="M22 7v5M10 20v5" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>selio<span class="brand-dot">.</span></span>
+    </a>
+    <nav class="languages" aria-label="Policy language">
+      <a href="#english" lang="en" data-language="en">English</a>
+      <a href="#chinese" lang="zh-CN" data-language="zh-CN">简体中文</a>
+    </nav>
+  </header>
+  <noscript><p class="noscript-note">Both language versions are shown below. / 以下同时显示英文和中文版本。</p></noscript>
+
+  <main id="policies">
+  <div id="english" class="policy-layout" data-policy-language="en" lang="en">
+    <aside class="contents">
+      <nav aria-label="Policy contents in English">
+        <p class="contents-title">On this page</p>
+        <div class="contents-links">
+          <a href="#en-scope">1. Scope &amp; developer</a>
+          <a href="#en-data">2. Data handled</a>
+          <a href="#en-requests">3. When data is sent</a>
+          <a href="#en-sharing">4. AI services &amp; sharing</a>
+          <a href="#en-storage">5. Storage &amp; security</a>
+          <a href="#en-controls">6. Retention &amp; deletion</a>
+          <a href="#en-permissions">7. Website access</a>
+          <a href="#en-limited-use">8. Limited Use</a>
+          <a href="#en-website">9. This policy website</a>
+          <a href="#en-contact">10. Changes &amp; contact</a>
+        </div>
+      </nav>
+    </aside>
+    <article class="document" id="main-en" tabindex="-1" aria-label="Privacy policy in English">
+      <p class="eyebrow">Selio for Chrome</p>
+      <h1>Privacy Policy</h1>
+      <p class="updated">Last updated: <time datetime="2026-10-12">October 12, 2026</time></p>
+      <p class="lead">This policy explains what Selio reads, what it sends to the AI service you choose, and what stays on your device.</p>
+      <p class="overview"><strong>The essentials:</strong> Selio has no developer-operated data relay or analytics service. AI requests go directly to your configured API endpoint. Settings and saved notes stay in the extension’s storage on your device.</p>
+
+      <section id="en-scope">
+        <h2>1. Scope and developer</h2>
+        <p>Selio — AI Reading Companion is a Chrome extension for translating, summarizing and explaining selected text, asking questions about the current webpage, and saving useful answers as notes. The developer responsible for Selio is <strong>zilong</strong>, reachable at <a href="mailto:zhou.zilong@qq.com">zhou.zilong@qq.com</a>.</p>
+        <p>This policy covers the extension’s data handling and this policy website. AI services, custom API endpoints, Chrome and the website hosting service may handle data under their own policies.</p>
+      </section>
+      <section id="en-data">
+        <h2>2. Data Selio handles</h2>
+        <dl class="facts">
+          <div><dt>Reading content</dt><dd>The text you select; its surrounding paragraph if you choose that scope; and, when you enable webpage context, the locally extracted page title and body passages. A page’s URL and title are also used locally to track its source and navigation. Content may include personal information or communications if they appear in the material you choose to process.</dd></div>
+          <div><dt>Questions and answers</dt><dd>Your questions, follow-up messages, prompt instructions and AI answers. Relevant retained conversation turns may be included in later requests so the AI service can respond in context.</dd></div>
+          <div><dt>Model configuration</dt><dd>Your selected provider, API endpoint, model identifier, API key and generation settings. The API key is used to authenticate requests to the endpoint you configure.</dd></div>
+          <div><dt>Preferences</dt><dd>Interface and translation languages, theme, reading actions and custom prompts, automatic selection preferences, and allowed or disabled website lists.</dd></div>
+          <div><dt>Saved notes</dt><dd>The selected text, source URL and title, AI answer, your optional remarks and tags, and timestamps. Notes are saved only when you choose to save an answer.</dd></div>
+          <div><dt>Local usage records</dt><dd>Model and provider information, action names, request times and status, and token counts reported by the AI service. These local records do not contain API keys, source text, prompts, answers or page URLs.</dd></div>
+        </dl>
+        <p>Selio does not read your browser history or use tracking or advertising SDKs. It does not collect payment details or require a Selio account. Webpage extraction excludes input fields, editable areas, embedded frames, images, screenshots, and hidden or unloaded content; text you intentionally submit may still contain sensitive information.</p>
+      </section>
+      <section id="en-requests">
+        <h2>3. When content is sent</h2>
+        <ul>
+          <li><strong>Selected-text actions:</strong> an AI request starts when you click the Selio selection icon, intentionally hover over it for approximately 0.8 seconds, use the selection context menu, switch to an uncached action or scope, regenerate an answer, or submit a follow-up. Selecting text by itself does not send it to an AI service.</li>
+          <li><strong>Webpage questions:</strong> opening the sidebar or refreshing the extracted page prepares context locally. Sending a question or choosing a suggested question sends the page title, the passages chosen for that request, context metadata, and relevant conversation history.</li>
+          <li><strong>General chat:</strong> when page context is off, requests contain your chat messages and applicable instructions, without automatically attaching the current page.</li>
+          <li><strong>Connection tests:</strong> a small test request is sent to your configured endpoint using your API key. It does not include your current webpage content.</li>
+          <li><strong>Notes:</strong> saving, searching, editing and exporting notes do not call the AI service.</li>
+        </ul>
+        <p>Selected-text requests do not automatically include the page title or URL. Webpage-context requests include the page title but do not automatically include the full page URL. Text, questions or custom prompts may themselves contain URLs or other information you provide. Depending on page length and your question, webpage context may include all extracted passages or only relevant excerpts.</p>
+      </section>
+      <section id="en-sharing">
+        <h2>4. AI services and data sharing</h2>
+        <p>AI requests travel directly from the extension to the <strong>API endpoint you configure</strong>. Available presets include OpenAI, Anthropic, Google Gemini, DeepSeek, Alibaba Cloud Qwen and Moonshot AI Kimi. You can also configure another compatible endpoint or a service you operate. Only the endpoint used for a request receives that request; Selio does not send it to every listed provider.</p>
+        <p>The selected endpoint receives the request content described above, your model identifier, generation settings and API key for authentication. As part of a normal network request, that service can also receive your IP address and request headers. If you configure a proxy or gateway, its operator receives the request.</p>
+        <p>The endpoint operator controls its own processing, retention, security, possible model-training use, and any onward sharing. Review that operator’s privacy policy and account settings before sending content. Selio does not operate that service or control copies it retains.</p>
+        <p>The developer does not receive the extension’s AI conversations, API keys or saved notes through a Selio backend. Selio does not sell user data, share it with advertising networks or data brokers, or use it to train developer-operated AI models. If you contact the developer for support, the developer receives the message and any information you choose to include, and uses it to respond and resolve your request.</p>
+      </section>
+      <section id="en-storage">
+        <h2>5. Local storage and security</h2>
+        <p>Settings, saved notes and local usage records are stored in Chrome extension storage on your device. Selio does not synchronize them through its own cloud service or Chrome sync. Current conversations and extracted webpage snapshots are kept in browser session memory.</p>
+        <p><strong>By default, API keys are saved on your device in unencrypted extension storage.</strong> A person or software with sufficient access to your device or browser profile may be able to read them. You can choose session-only key storage instead; those keys do not persist across browser restarts.</p>
+        <p>Remote API endpoints must use HTTPS. HTTP is allowed only for loopback endpoints on your own computer, such as localhost. Requests do not attach the cookies from the page you are reading. Extension storage access is restricted to trusted extension contexts, and ordinary webpages cannot list your models or all saved notes.</p>
+        <p>Protect your device and API keys, and use an AI endpoint you trust. Selio does not claim that local storage is encrypted or that sending content to an AI service makes it private from that service.</p>
+      </section>
+      <section id="en-controls">
+        <h2>6. Retention and deletion</h2>
+        <ul>
+          <li><strong>Settings and persistent API keys</strong> remain until you change or delete them, remove the model, or clear all Selio data.</li>
+          <li><strong>Conversations and page snapshots</strong> are kept for the current browser session and are removed when the associated tab is closed. Closing the floating panel keeps the current conversation available in that tab.</li>
+          <li><strong>Saved notes</strong> remain until you delete them or clear all Selio data. You can edit remarks and tags, delete individual notes, and export selected notes as Markdown.</li>
+          <li><strong>Usage records</strong> are limited to the latest 1,000 records. You can clear them on the Token usage page or by clearing all Selio data.</li>
+        </ul>
+        <p>To clear the extension’s stored models, keys, preferences, conversations, usage and notes, open <strong>Selio Settings → Privacy &amp; access → Clear all data</strong> and confirm. This resets the extension’s settings.</p>
+        <p>Clearing Selio data does not delete Markdown files you have already exported, support emails, or information already received by an AI endpoint. Manage exported files on your device and contact the relevant service operator for its data-deletion options. For support correspondence, the developer keeps it only as needed to respond, resolve the matter, or meet applicable obligations; you can request deletion by email.</p>
+      </section>
+      <section id="en-permissions">
+        <h2>7. Website access and your choices</h2>
+        <p>Selio requests HTTP/HTTPS website access so its selection tool can appear on webpages and it can communicate with your configured API. Automatic selection on ordinary websites is enabled by default. You can turn it off, use a specified website list, disable individual sites, or limit website access in Chrome’s extension settings.</p>
+        <p>Storage supports local settings and data; scripting and active-tab access support the selection interface and page extraction; context-menu access provides a selected-text action; and side-panel access lets you keep a conversation beside a webpage. These permissions do not authorize Selio to collect unrelated browsing history or send every visited page to an AI service.</p>
+      </section>
+      <section id="en-limited-use">
+        <h2>8. Chrome Web Store Limited Use</h2>
+        <p>Selio’s use and transfer of user information, including information obtained through Chrome APIs, complies with the <a href="https://developer.chrome.com/docs/webstore/program-policies/limited-use" target="_blank" rel="noopener noreferrer">Chrome Web Store User Data Policy and its Limited Use requirements</a>.</p>
+        <p>User information is used only to provide or improve the reading, chat and note features described in this policy. It is not sold, used for personalized advertising, or used to determine creditworthiness. Transfers are limited to providing these features and the exceptions permitted by the policy, such as applicable legal or security requirements. Selio’s developer does not allow people to read extension user data except with specific user consent or as permitted for legal or security reasons.</p>
+      </section>
+      <section id="en-website">
+        <h2>9. This policy website</h2>
+        <p>This page includes no analytics, advertising trackers, third-party fonts, cookies or browser-storage code. Its language switch operates on this page without saving a preference.</p>
+        <p>If the page is hosted on GitHub Pages, GitHub may process standard website request information when you visit it, including your IP address. Hosting-related processing is governed by the <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener noreferrer">GitHub General Privacy Statement</a>. Clicking an external link takes you to a service governed by its own policy.</p>
+      </section>
+      <section id="en-contact">
+        <h2>10. Changes and contact</h2>
+        <p>This policy may be updated when Selio’s features or data practices change. The date above identifies the most recent revision. Changes to data use that require additional notice or consent will be disclosed as required.</p>
+        <p>For privacy questions, support or requests concerning information you have sent to the developer, contact:</p>
+        <address class="contact"><strong>zilong</strong><br><a href="mailto:zhou.zilong@qq.com">zhou.zilong@qq.com</a></address>
+      </section>
+    </article>
+  </div>
+
+  <div id="chinese" class="policy-layout" data-policy-language="zh-CN" lang="zh-CN">
+    <aside class="contents">
+      <nav aria-label="中文隐私政策目录">
+        <p class="contents-title">本页内容</p>
+        <div class="contents-links">
+          <a href="#zh-scope">1. 适用范围与开发者</a>
+          <a href="#zh-data">2. 处理的数据</a>
+          <a href="#zh-requests">3. 数据发送时机</a>
+          <a href="#zh-sharing">4. AI 服务与数据共享</a>
+          <a href="#zh-storage">5. 本地存储与安全</a>
+          <a href="#zh-controls">6. 保存期限与删除</a>
+          <a href="#zh-permissions">7. 网站权限与控制</a>
+          <a href="#zh-limited-use">8. 有限使用承诺</a>
+          <a href="#zh-website">9. 隐私政策网站</a>
+          <a href="#zh-contact">10. 更新与联系方式</a>
+        </div>
+      </nav>
+    </aside>
+    <article class="document" id="main-zh" tabindex="-1" aria-label="简体中文隐私政策">
+      <p class="eyebrow">Selio for Chrome</p>
+      <h1>隐私政策</h1>
+      <p class="updated">最后更新：<time datetime="2026-10-12">2026 年 10 月 12 日</time></p>
+      <p class="lead">本政策说明 Selio 读取哪些内容、向您选择的 AI 服务发送哪些数据，以及哪些信息保存在您的设备上。</p>
+      <p class="overview"><strong>主要信息：</strong>Selio 没有由开发者运营的数据中转或分析服务。AI 请求直接发送到您配置的 API 地址。设置与收藏笔记保存在您设备上的扩展存储中。</p>
+
+      <section id="zh-scope">
+        <h2>1. 适用范围与开发者</h2>
+        <p>Selio — AI Reading Companion 是一个 Chrome 扩展，用于翻译、总结和解释选中文字、针对当前网页提问，以及把有用的回答保存为笔记。Selio 的开发者为 <strong>zilong</strong>，联系邮箱为 <a href="mailto:zhou.zilong@qq.com">zhou.zilong@qq.com</a>。</p>
+        <p>本政策适用于扩展的数据处理及本隐私政策网页。AI 服务、自定义 API 服务、Chrome 和网页托管服务可能按照各自的政策处理数据。</p>
+      </section>
+      <section id="zh-data">
+        <h2>2. Selio 处理的数据</h2>
+        <dl class="facts">
+          <div><dt>阅读内容</dt><dd>您选中的文字；在您选择相应发送范围时，文字所在的段落；启用网页上下文后，在本机提取的网页标题和正文片段。网页 URL 与标题也会在本机用于记录来源和检查页面跳转。如果您选择的内容包含个人信息或私人通信，这些信息也可能被处理。</dd></div>
+          <div><dt>问题与回答</dt><dd>您输入的问题、追问、Prompt 指令及 AI 回答。后续请求可能附带保留的相关对话，以便 AI 服务理解上下文。</dd></div>
+          <div><dt>模型配置</dt><dd>您选择的供应商、API 地址、模型标识、API Key 和生成设置。API Key 用于向您配置的接口验证请求。</dd></div>
+          <div><dt>使用偏好</dt><dd>界面和翻译语言、主题、阅读操作与自定义 Prompt、自动划词设置，以及允许或禁用的网站列表。</dd></div>
+          <div><dt>收藏笔记</dt><dd>选中文字、原文 URL 和标题、AI 回答、您填写的备注与标签，以及时间信息。只有您主动保存回答时才会生成收藏笔记。</dd></div>
+          <div><dt>本地用量记录</dt><dd>模型与供应商信息、操作名称、请求时间和状态，以及 AI 服务返回的 Token 数量。这些记录不包含 API Key、原文、Prompt、回答内容或网页 URL。</dd></div>
+        </dl>
+        <p>Selio 不读取浏览器历史记录，不使用追踪或广告 SDK，不收集支付信息，也不要求注册 Selio 账户。网页正文提取会排除输入框、可编辑区域、嵌入页面、图片、截图，以及隐藏或尚未加载的内容；但您主动提交的文字仍可能包含敏感信息。</p>
+      </section>
+      <section id="zh-requests">
+        <h2>3. 数据何时发送</h2>
+        <ul>
+          <li><strong>划词操作：</strong>点击 Selio 选区图标、主动悬停在图标上约 0.8 秒、使用选区右键菜单、切换到尚未缓存的操作或发送范围、重新生成或提交追问时，可能发起 AI 请求。单纯选中文字不会将其发送到 AI 服务。</li>
+          <li><strong>网页问答：</strong>打开侧边栏或刷新正文只会在本机准备上下文。发送问题或点击建议问题时，会发送网页标题、本次请求选用的正文片段、范围元数据和相关对话记录。</li>
+          <li><strong>普通聊天：</strong>关闭网页上下文后，请求包含您的聊天消息及相应指令，不会自动附加当前网页。</li>
+          <li><strong>连接测试：</strong>使用 API Key 向您配置的地址发送简短测试请求，不附带当前网页内容。</li>
+          <li><strong>笔记操作：</strong>保存、搜索、编辑和导出笔记不会调用 AI 服务。</li>
+        </ul>
+        <p>划词请求不会自动附加网页标题或 URL。网页上下文请求会附加网页标题，但不会自动附加完整网页 URL。您提交的原文、问题或自定义 Prompt 本身可能包含 URL 或其他信息。根据网页长度和问题，网页上下文可能包含全部已提取片段，也可能只包含相关部分。</p>
+      </section>
+      <section id="zh-sharing">
+        <h2>4. AI 服务与数据共享</h2>
+        <p>AI 请求由扩展直接发送到<strong>您配置的 API 地址</strong>。预设支持 OpenAI、Anthropic、Google Gemini、DeepSeek、阿里云 Qwen 和 Moonshot AI Kimi；您也可以配置其他兼容接口或自行运营的服务。每次请求只发送到该请求所用的地址，不会发送给所有列出的供应商。</p>
+        <p>所选接口会收到上述请求内容、模型标识、生成设置，以及用于认证的 API Key。正常网络通信还可能使该服务收到您的 IP 地址和请求头。如果您使用代理或网关，其运营者会收到请求。</p>
+        <p>接口运营者独立决定其数据处理、保存期限、安全措施、可能的模型训练用途及后续共享。发送内容前，请查阅该运营者的隐私政策和账户设置。Selio 不运营这些服务，也无法控制它们已经保留的数据副本。</p>
+        <p>开发者不会通过 Selio 后台接收扩展中的 AI 对话、API Key 或收藏笔记。Selio 不出售用户数据，不向广告网络或数据经纪商共享数据，也不使用这些数据训练开发者运营的 AI 模型。您联系开发者寻求支持时，开发者会收到您的来信及您主动提供的信息，并用于回复和处理该请求。</p>
+      </section>
+      <section id="zh-storage">
+        <h2>5. 本地存储与安全</h2>
+        <p>设置、收藏笔记和用量记录保存在您设备上的 Chrome 扩展存储中。Selio 不通过自有云服务或 Chrome 同步这些数据。当前对话和提取的网页快照暂存在浏览器会话内存中。</p>
+        <p><strong>默认情况下，API Key 会以未加密形式保存在本机扩展存储中。</strong>拥有足够设备或浏览器配置文件访问权限的人或软件可能读取这些密钥。您可以改用“仅本次浏览器会话”保存方式，此类密钥不会在浏览器重启后继续保留。</p>
+        <p>远程 API 地址必须使用 HTTPS；只有指向您本机的回环地址（例如 localhost）允许使用 HTTP。请求不会携带所阅读网页的 Cookie。扩展存储仅向可信扩展环境开放，普通网页无法列出您的模型或全部收藏笔记。</p>
+        <p>请保护设备与 API Key，并选择您信任的 AI 接口。Selio 不声称本地存储已经加密，也不声称发送给 AI 服务的内容对该服务不可见。</p>
+      </section>
+      <section id="zh-controls">
+        <h2>6. 保存期限与删除</h2>
+        <ul>
+          <li><strong>设置与持久保存的 API Key：</strong>保留至您修改或删除、移除对应模型，或清除全部 Selio 数据。</li>
+          <li><strong>对话与网页快照：</strong>在当前浏览器会话中保存，关闭对应标签页后清除。关闭浮窗仍会保留该标签页的当前对话。</li>
+          <li><strong>收藏笔记：</strong>保留至您删除或清除全部数据。您可以修改备注与标签、删除单条收藏，并将选定笔记导出为 Markdown。</li>
+          <li><strong>用量记录：</strong>最多保留最近 1,000 条。可在 Token 用量页清除，也可随全部 Selio 数据一起清除。</li>
+        </ul>
+        <p>要清除扩展中保存的模型、密钥、偏好、对话、用量和笔记，请打开<strong>Selio 设置 → 隐私与权限 → 清除全部数据</strong>并确认。此操作会恢复扩展的默认设置。</p>
+        <p>清除 Selio 数据不会删除您已经导出的 Markdown 文件、支持邮件或 AI 接口已经收到的信息。请在设备上自行管理导出的文件，并向相关服务运营者了解其数据删除方式。开发者仅在回复、处理支持事项或履行适用义务所需的期间保存支持通信；您可以通过邮箱申请删除。</p>
+      </section>
+      <section id="zh-permissions">
+        <h2>7. 网站权限与您的控制</h2>
+        <p>Selio 申请 HTTP/HTTPS 网站访问权限，用于在网页上显示划词工具，以及与您配置的 API 通信。普通网站的自动划词默认开启。您可以关闭该功能、仅允许指定网站、禁用个别网站，或在 Chrome 扩展设置中限制网站访问。</p>
+        <p>存储权限用于本地设置与数据；脚本和当前标签页访问用于划词界面及正文提取；右键菜单权限提供选区操作入口；侧边栏权限用于在网页旁保留对话。这些权限不用于收集无关的浏览历史，也不用于把每个访问过的页面发送到 AI 服务。</p>
+      </section>
+      <section id="zh-limited-use">
+        <h2>8. Chrome 应用商店有限使用承诺</h2>
+        <p>Selio 对用户信息的使用和转移，包括通过 Chrome API 获取的信息，遵守 <a href="https://developer.chrome.com/docs/webstore/program-policies/limited-use" target="_blank" rel="noopener noreferrer">Chrome Web Store 用户数据政策及其 Limited Use（有限使用）要求</a>。</p>
+        <p>用户信息仅用于提供或改进本政策描述的阅读、聊天和笔记功能，不会出售，不用于个性化广告，也不用于评估信用状况。数据转移仅限于实现这些功能以及政策允许的例外，例如适用的法律或安全要求。除用户明确授权或法律、安全原因允许的情况外，开发者不会允许人员阅读扩展用户数据。</p>
+      </section>
+      <section id="zh-website">
+        <h2>9. 隐私政策网站</h2>
+        <p>本网页不包含分析工具、广告追踪、第三方字体、Cookie 或浏览器存储代码。语言切换只影响当前网页，不保存语言偏好。</p>
+        <p>如果本页通过 GitHub Pages 托管，GitHub 可能在访问时处理包括 IP 地址在内的常规网页请求信息。此类托管服务的数据处理适用 <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener noreferrer">GitHub 一般隐私声明</a>。点击外部链接后，目标服务适用其自身的隐私政策。</p>
+      </section>
+      <section id="zh-contact">
+        <h2>10. 更新与联系方式</h2>
+        <p>Selio 的功能或数据处理方式发生变化时，本政策可能更新。页首日期表示最近一次修订。需要额外告知或取得同意的数据用途变更，会按要求进行说明。</p>
+        <p>如果您有隐私问题、支持需求，或希望就主动发送给开发者的信息提出请求，请联系：</p>
+        <address class="contact"><strong>zilong</strong><br><a href="mailto:zhou.zilong@qq.com">zhou.zilong@qq.com</a></address>
+      </section>
+    </article>
+  </div>
+  </main>
+
+  <footer class="page-footer"><span>Selio — AI Reading Companion</span><a href="mailto:zhou.zilong@qq.com">zhou.zilong@qq.com</a></footer>
+  <script>
+    (() => {
+      const panels = [...document.querySelectorAll('[data-policy-language]')];
+      const languageLinks = [...document.querySelectorAll('[data-language]')];
+      const skipLink = document.querySelector('.skip-link');
+      const languageForHash = () => location.hash === '#chinese' || /^#(?:zh-|main-zh)/.test(location.hash) ? 'zh-CN' : 'en';
+      const showLanguage = language => {
+        panels.forEach(panel => { panel.hidden = panel.dataset.policyLanguage !== language; });
+        languageLinks.forEach(link => {
+          if (link.dataset.language === language) link.setAttribute('aria-current', 'true');
+          else link.removeAttribute('aria-current');
+        });
+        document.documentElement.lang = language;
+        skipLink.href = language === 'zh-CN' ? '#main-zh' : '#main-en';
+        document.title = language === 'zh-CN' ? 'Selio — 隐私政策' : 'Selio — Privacy Policy';
+      };
+      window.addEventListener('hashchange', () => {
+        showLanguage(languageForHash());
+        if (location.hash === '#english' || location.hash === '#chinese') window.scrollTo({ top:0, behavior:'instant' });
+        else document.getElementById(location.hash.slice(1))?.scrollIntoView();
+      });
+      showLanguage(languageForHash());
+    })();
+  </script>
+</body>
+</html>

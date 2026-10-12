@@ -1,0 +1,12 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]: THE READING ROOM
+    - generic [ref=e4]: Notes on learning & curiosity
+  - article [ref=e5]:
+    - text: FIELD NOTES / 01
+    - heading "Make room for understanding." [level=1] [ref=e6]: Make room forunderstanding.
+    - generic [ref=e7]: Attention, curiosity, and the way we read · 3 min read
+    - paragraph [ref=e8]: Attention is the beginning of understanding. When we slow down and ask better questions, familiar ideas reveal new possibilities.
+    - paragraph [ref=e9]: Reading is more than collecting information. A useful question connects what we have just learned to something we already know.
+    - paragraph [ref=e10]: Read thoughtfully. Stay curious.
+  - contentinfo [ref=e11]: Demonstration page · Example AI responses

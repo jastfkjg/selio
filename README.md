@@ -33,6 +33,22 @@ pnpm zip
 
 加载 `.output/chrome-mv3` 即可使用生产版本。`pnpm zip` 在 `.output` 内生成可分发 ZIP；安装前先解压并加载其中包含 `manifest.json` 的目录。开发构建包含 WXT 开发工具配置，分发时应使用生产构建。
 
+## 隐私政策与 GitHub Pages
+
+仓库根目录的 [index.html](index.html) 是 Selio 的静态隐私政策网页，包含英文与简体中文版本，无需安装依赖或执行构建。开发者为 zilong，联系邮箱为 zhou.zilong@qq.com，最近更新日期为 2026-10-12。根目录的 `.nojekyll` 用于让 GitHub Pages 直接提供静态文件。
+
+将整个 Selio 项目上传到新建的 GitHub 仓库后，在 **Settings → Pages → Build and deployment** 中选择：
+
+- Source：**Deploy from a branch**
+- Branch：**main**（或实际上传项目的分支）
+- Folder：**/(root)**
+
+保存并等待发布完成。打开 Pages 页面提供的真实网站地址，确认无需登录即可查看完整政策，再将该地址填写到 Chrome Web Store 的 **隐私权 → 隐私政策网址**，并保存草稿。
+
+网页默认显示英文，在网址末尾加 `#chinese` 可直接打开中文版；关闭 JavaScript 时两个版本仍可阅读。修改开发者名称、邮箱或数据处理说明时，请同步更新 `index.html` 中的中英文内容及修订日期，并使商店隐私披露与实际发布版本保持一致。
+
+参考：[Chrome Web Store 隐私政策要求](https://developer.chrome.com/docs/webstore/program-policies/privacy)、[Limited Use 要求](https://developer.chrome.com/docs/webstore/program-policies/limited-use)、[GitHub Pages 发布设置](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)。
+
 ## 使用方式
 
 - **划词浮窗**：默认 420px，自动避让视口边缘。拖动标题栏或抓手移动，拖动右侧、底部或右下角调整大小；抓手和缩放按钮支持方向键，Shift + 方向键加大步幅，双击抓手恢复自动定位。手动移动后固定在视口内，缩小浏览器窗口时自动约束位置和尺寸。网页 CSS 通过 Shadow DOM 隔离，字体尺寸使用 px，避免宿主页面的 rem 缩放干扰。

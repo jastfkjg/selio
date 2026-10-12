@@ -1,0 +1,168 @@
+- generic [active] [ref=e1]:
+  - link "Skip to policy / 跳转到隐私政策" [ref=e2] [cursor=pointer]:
+    - /url: "#main-en"
+  - banner [ref=e3]:
+    - link "Selio privacy policy" [ref=e4] [cursor=pointer]:
+      - /url: "#english"
+      - generic [ref=e9]: selio.
+    - navigation "Policy language" [ref=e10]:
+      - link "English" [ref=e11] [cursor=pointer]:
+        - /url: "#english"
+      - link "简体中文" [ref=e12] [cursor=pointer]:
+        - /url: "#chinese"
+  - main [ref=e13]:
+    - generic [ref=e14]:
+      - complementary [ref=e15]:
+        - navigation "Policy contents in English" [ref=e16]:
+          - paragraph [ref=e17]: On this page
+          - generic [ref=e18]:
+            - link "1. Scope & developer" [ref=e19] [cursor=pointer]:
+              - /url: "#en-scope"
+            - link "2. Data handled" [ref=e20] [cursor=pointer]:
+              - /url: "#en-data"
+            - link "3. When data is sent" [ref=e21] [cursor=pointer]:
+              - /url: "#en-requests"
+            - link "4. AI services & sharing" [ref=e22] [cursor=pointer]:
+              - /url: "#en-sharing"
+            - link "5. Storage & security" [ref=e23] [cursor=pointer]:
+              - /url: "#en-storage"
+            - link "6. Retention & deletion" [ref=e24] [cursor=pointer]:
+              - /url: "#en-controls"
+            - link "7. Website access" [ref=e25] [cursor=pointer]:
+              - /url: "#en-permissions"
+            - link "8. Limited Use" [ref=e26] [cursor=pointer]:
+              - /url: "#en-limited-use"
+            - link "9. This policy website" [ref=e27] [cursor=pointer]:
+              - /url: "#en-website"
+            - link "10. Changes & contact" [ref=e28] [cursor=pointer]:
+              - /url: "#en-contact"
+      - article "Privacy policy in English" [ref=e29]:
+        - paragraph [ref=e30]: Selio for Chrome
+        - heading "Privacy Policy" [level=1] [ref=e31]
+        - paragraph [ref=e32]:
+          - text: "Last updated:"
+          - time [ref=e33]: October 12, 2026
+        - paragraph [ref=e34]: This policy explains what Selio reads, what it sends to the AI service you choose, and what stays on your device.
+        - paragraph [ref=e35]:
+          - strong [ref=e36]: "The essentials:"
+          - text: Selio has no developer-operated data relay or analytics service. AI requests go directly to your configured API endpoint. Settings and saved notes stay in the extension’s storage on your device.
+        - generic [ref=e37]:
+          - heading "1. Scope and developer" [level=2] [ref=e38]
+          - paragraph [ref=e39]:
+            - text: Selio — AI Reading Companion is a Chrome extension for translating, summarizing and explaining selected text, asking questions about the current webpage, and saving useful answers as notes. The developer responsible for Selio is
+            - strong [ref=e40]: zilong
+            - text: ", reachable at"
+            - link "zhou.zilong@qq.com" [ref=e41] [cursor=pointer]:
+              - /url: mailto:zhou.zilong@qq.com
+            - text: .
+          - paragraph [ref=e42]: This policy covers the extension’s data handling and this policy website. AI services, custom API endpoints, Chrome and the website hosting service may handle data under their own policies.
+        - generic [ref=e43]:
+          - heading "2. Data Selio handles" [level=2] [ref=e44]
+          - generic [ref=e45]:
+            - generic [ref=e46]:
+              - term [ref=e47]: Reading content
+              - definition [ref=e48]: The text you select; its surrounding paragraph if you choose that scope; and, when you enable webpage context, the locally extracted page title and body passages. A page’s URL and title are also used locally to track its source and navigation. Content may include personal information or communications if they appear in the material you choose to process.
+            - generic [ref=e49]:
+              - term [ref=e50]: Questions and answers
+              - definition [ref=e51]: Your questions, follow-up messages, prompt instructions and AI answers. Relevant retained conversation turns may be included in later requests so the AI service can respond in context.
+            - generic [ref=e52]:
+              - term [ref=e53]: Model configuration
+              - definition [ref=e54]: Your selected provider, API endpoint, model identifier, API key and generation settings. The API key is used to authenticate requests to the endpoint you configure.
+            - generic [ref=e55]:
+              - term [ref=e56]: Preferences
+              - definition [ref=e57]: Interface and translation languages, theme, reading actions and custom prompts, automatic selection preferences, and allowed or disabled website lists.
+            - generic [ref=e58]:
+              - term [ref=e59]: Saved notes
+              - definition [ref=e60]: The selected text, source URL and title, AI answer, your optional remarks and tags, and timestamps. Notes are saved only when you choose to save an answer.
+            - generic [ref=e61]:
+              - term [ref=e62]: Local usage records
+              - definition [ref=e63]: Model and provider information, action names, request times and status, and token counts reported by the AI service. These local records do not contain API keys, source text, prompts, answers or page URLs.
+          - paragraph [ref=e64]: Selio does not read your browser history or use tracking or advertising SDKs. It does not collect payment details or require a Selio account. Webpage extraction excludes input fields, editable areas, embedded frames, images, screenshots, and hidden or unloaded content; text you intentionally submit may still contain sensitive information.
+        - generic [ref=e65]:
+          - heading "3. When content is sent" [level=2] [ref=e66]
+          - list [ref=e67]:
+            - listitem [ref=e68]:
+              - strong [ref=e69]: "Selected-text actions:"
+              - text: an AI request starts when you click the Selio selection icon, intentionally hover over it for approximately 0.8 seconds, use the selection context menu, switch to an uncached action or scope, regenerate an answer, or submit a follow-up. Selecting text by itself does not send it to an AI service.
+            - listitem [ref=e70]:
+              - strong [ref=e71]: "Webpage questions:"
+              - text: opening the sidebar or refreshing the extracted page prepares context locally. Sending a question or choosing a suggested question sends the page title, the passages chosen for that request, context metadata, and relevant conversation history.
+            - listitem [ref=e72]:
+              - strong [ref=e73]: "General chat:"
+              - text: when page context is off, requests contain your chat messages and applicable instructions, without automatically attaching the current page.
+            - listitem [ref=e74]:
+              - strong [ref=e75]: "Connection tests:"
+              - text: a small test request is sent to your configured endpoint using your API key. It does not include your current webpage content.
+            - listitem [ref=e76]:
+              - strong [ref=e77]: "Notes:"
+              - text: saving, searching, editing and exporting notes do not call the AI service.
+          - paragraph [ref=e78]: Selected-text requests do not automatically include the page title or URL. Webpage-context requests include the page title but do not automatically include the full page URL. Text, questions or custom prompts may themselves contain URLs or other information you provide. Depending on page length and your question, webpage context may include all extracted passages or only relevant excerpts.
+        - generic [ref=e79]:
+          - heading "4. AI services and data sharing" [level=2] [ref=e80]
+          - paragraph [ref=e81]:
+            - text: AI requests travel directly from the extension to the
+            - strong [ref=e82]: API endpoint you configure
+            - text: . Available presets include OpenAI, Anthropic, Google Gemini, DeepSeek, Alibaba Cloud Qwen and Moonshot AI Kimi. You can also configure another compatible endpoint or a service you operate. Only the endpoint used for a request receives that request; Selio does not send it to every listed provider.
+          - paragraph [ref=e83]: The selected endpoint receives the request content described above, your model identifier, generation settings and API key for authentication. As part of a normal network request, that service can also receive your IP address and request headers. If you configure a proxy or gateway, its operator receives the request.
+          - paragraph [ref=e84]: The endpoint operator controls its own processing, retention, security, possible model-training use, and any onward sharing. Review that operator’s privacy policy and account settings before sending content. Selio does not operate that service or control copies it retains.
+          - paragraph [ref=e85]: The developer does not receive the extension’s AI conversations, API keys or saved notes through a Selio backend. Selio does not sell user data, share it with advertising networks or data brokers, or use it to train developer-operated AI models. If you contact the developer for support, the developer receives the message and any information you choose to include, and uses it to respond and resolve your request.
+        - generic [ref=e86]:
+          - heading "5. Local storage and security" [level=2] [ref=e87]
+          - paragraph [ref=e88]: Settings, saved notes and local usage records are stored in Chrome extension storage on your device. Selio does not synchronize them through its own cloud service or Chrome sync. Current conversations and extracted webpage snapshots are kept in browser session memory.
+          - paragraph [ref=e89]:
+            - strong [ref=e90]: By default, API keys are saved on your device in unencrypted extension storage.
+            - text: A person or software with sufficient access to your device or browser profile may be able to read them. You can choose session-only key storage instead; those keys do not persist across browser restarts.
+          - paragraph [ref=e91]: Remote API endpoints must use HTTPS. HTTP is allowed only for loopback endpoints on your own computer, such as localhost. Requests do not attach the cookies from the page you are reading. Extension storage access is restricted to trusted extension contexts, and ordinary webpages cannot list your models or all saved notes.
+          - paragraph [ref=e92]: Protect your device and API keys, and use an AI endpoint you trust. Selio does not claim that local storage is encrypted or that sending content to an AI service makes it private from that service.
+        - generic [ref=e93]:
+          - heading "6. Retention and deletion" [level=2] [ref=e94]
+          - list [ref=e95]:
+            - listitem [ref=e96]:
+              - strong [ref=e97]: Settings and persistent API keys
+              - text: remain until you change or delete them, remove the model, or clear all Selio data.
+            - listitem [ref=e98]:
+              - strong [ref=e99]: Conversations and page snapshots
+              - text: are kept for the current browser session and are removed when the associated tab is closed. Closing the floating panel keeps the current conversation available in that tab.
+            - listitem [ref=e100]:
+              - strong [ref=e101]: Saved notes
+              - text: remain until you delete them or clear all Selio data. You can edit remarks and tags, delete individual notes, and export selected notes as Markdown.
+            - listitem [ref=e102]:
+              - strong [ref=e103]: Usage records
+              - text: are limited to the latest 1,000 records. You can clear them on the Token usage page or by clearing all Selio data.
+          - paragraph [ref=e104]:
+            - text: To clear the extension’s stored models, keys, preferences, conversations, usage and notes, open
+            - strong [ref=e105]: Selio Settings → Privacy & access → Clear all data
+            - text: and confirm. This resets the extension’s settings.
+          - paragraph [ref=e106]: Clearing Selio data does not delete Markdown files you have already exported, support emails, or information already received by an AI endpoint. Manage exported files on your device and contact the relevant service operator for its data-deletion options. For support correspondence, the developer keeps it only as needed to respond, resolve the matter, or meet applicable obligations; you can request deletion by email.
+        - generic [ref=e107]:
+          - heading "7. Website access and your choices" [level=2] [ref=e108]
+          - paragraph [ref=e109]: Selio requests HTTP/HTTPS website access so its selection tool can appear on webpages and it can communicate with your configured API. Automatic selection on ordinary websites is enabled by default. You can turn it off, use a specified website list, disable individual sites, or limit website access in Chrome’s extension settings.
+          - paragraph [ref=e110]: Storage supports local settings and data; scripting and active-tab access support the selection interface and page extraction; context-menu access provides a selected-text action; and side-panel access lets you keep a conversation beside a webpage. These permissions do not authorize Selio to collect unrelated browsing history or send every visited page to an AI service.
+        - generic [ref=e111]:
+          - heading "8. Chrome Web Store Limited Use" [level=2] [ref=e112]
+          - paragraph [ref=e113]:
+            - text: Selio’s use and transfer of user information, including information obtained through Chrome APIs, complies with the
+            - link "Chrome Web Store User Data Policy and its Limited Use requirements" [ref=e114] [cursor=pointer]:
+              - /url: https://developer.chrome.com/docs/webstore/program-policies/limited-use
+            - text: .
+          - paragraph [ref=e115]: User information is used only to provide or improve the reading, chat and note features described in this policy. It is not sold, used for personalized advertising, or used to determine creditworthiness. Transfers are limited to providing these features and the exceptions permitted by the policy, such as applicable legal or security requirements. Selio’s developer does not allow people to read extension user data except with specific user consent or as permitted for legal or security reasons.
+        - generic [ref=e116]:
+          - heading "9. This policy website" [level=2] [ref=e117]
+          - paragraph [ref=e118]: This page includes no analytics, advertising trackers, third-party fonts, cookies or browser-storage code. Its language switch operates on this page without saving a preference.
+          - paragraph [ref=e119]:
+            - text: If the page is hosted on GitHub Pages, GitHub may process standard website request information when you visit it, including your IP address. Hosting-related processing is governed by the
+            - link "GitHub General Privacy Statement" [ref=e120] [cursor=pointer]:
+              - /url: https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement
+            - text: . Clicking an external link takes you to a service governed by its own policy.
+        - generic [ref=e121]:
+          - heading "10. Changes and contact" [level=2] [ref=e122]
+          - paragraph [ref=e123]: This policy may be updated when Selio’s features or data practices change. The date above identifies the most recent revision. Changes to data use that require additional notice or consent will be disclosed as required.
+          - paragraph [ref=e124]: "For privacy questions, support or requests concerning information you have sent to the developer, contact:"
+          - generic [ref=e125]:
+            - strong [ref=e126]: zilong
+            - link "zhou.zilong@qq.com" [ref=e127] [cursor=pointer]:
+              - /url: mailto:zhou.zilong@qq.com
+  - contentinfo [ref=e128]:
+    - generic [ref=e129]: Selio — AI Reading Companion
+    - link "zhou.zilong@qq.com" [ref=e130] [cursor=pointer]:
+      - /url: mailto:zhou.zilong@qq.com
