@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DEFAULT_ACTIONS } from '../shared/actions';
+import { notesChanged } from '../shared/note-events';
+import { applyProgress, DraftQueue } from '../shared/chat-updates';
 import { DEFAULT_PREFERENCES, type ChatCommand, type Conversation, type Preferences, type PublicModel, type PublicAction, type ServerEvent } from '../shared/types';
 
 export function useChat(tabId?: number) {
@@ -13,6 +15,12 @@ export function useChat(tabId?: number) {
   const [error, setError] = useState('');
   const portRef = useRef<chrome.runtime.Port | null>(null);
   const idRef = useRef<string | undefined>(undefined);
+  const conversationRef = useRef(conversation);
+  conversationRef.current = conversation;
+  const [commands] = useState(() => new DraftQueue(command => {
+    try { portRef.current?.postMessage(command); }
+    catch { setError('扩展连接中断，请刷新网页重试。'); }
+  }));
   useEffect(() => {
     let disposed = false;
     let retry: ReturnType<typeof setTimeout>;
@@ -40,9 +48,11 @@ export function useChat(tabId?: number) {
           clearTimeout(watchdog);
           if (!received) { setError(''); received = true; }
           setConnected(true);
-          if (event.type === 'state') { idRef.current = event.conversation?.id; setConversation(event.conversation); }
+          if (event.type === 'state') { idRef.current = event.conversation?.id; conversationRef.current = event.conversation; setConversation(event.conversation); }
+          if (event.type === 'progress') setConversation(state => applyProgress(state, event));
           if (event.type === 'preferences') { setPreferences(event.preferences); setModelName(event.modelName); setModels(event.models); setActions(event.actions); }
           if (event.type === 'error') setError(event.error);
+          if (event.type === 'notes-changed') notesChanged();
         });
         port.onDisconnect.addListener(reconnect);
         port.postMessage({ type: 'subscribe', tabId });
@@ -56,13 +66,16 @@ export function useChat(tabId?: number) {
       } catch { setConnected(false); setError('扩展已更新，请刷新网页后继续。'); }
     };
     connect();
-    return () => { disposed = true; clearTimeout(retry); clearTimeout(watchdog); clearInterval(heartbeat); portRef.current?.disconnect(); };
-  }, [tabId]);
+    const hidden = () => { if (document.hidden) commands.flush(); };
+    window.addEventListener('pagehide', commands.flush);
+    document.addEventListener('visibilitychange', hidden);
+    return () => { commands.flush(); disposed = true; clearTimeout(retry); clearTimeout(watchdog); clearInterval(heartbeat); portRef.current?.disconnect(); window.removeEventListener('pagehide', commands.flush); document.removeEventListener('visibilitychange', hidden); };
+  }, [tabId, commands]);
   const send = useCallback((command: ChatCommand) => {
     setError('');
-    try { portRef.current?.postMessage({ ...command, conversationId: command.conversationId ?? idRef.current }); }
-    catch { setError('扩展连接中断，请刷新网页重试。'); }
-  }, []);
-  return { conversation, preferences, modelName, models, actions, connected, error, setError, send };
+    const state = conversationRef.current;
+    commands.send({ ...command, conversationId: command.conversationId ?? idRef.current, ...((command.type === 'draft' || command.type === 'prompt-draft') ? { action: state?.action, scope: state?.scope } : {}) });
+  }, [commands]);
+  return { conversation, preferences, modelName, models, actions, connected, error, setError, send, flushDraft: commands.flush };
 }
 export type ChatSession = ReturnType<typeof useChat>;

@@ -58,6 +58,20 @@ function Panel() {
   const t = translator(preferences.uiLanguage);
   const theme = useTheme(preferences.theme);
   const [view, setView] = useState<'chat' | 'notes'>('chat');
+  const [noteRequest, setNoteRequest] = useState<{ id: string; request: string } | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    let key = '';
+    const accept = (value: unknown) => {
+      const focus = value as { id?: string; request?: string } | undefined;
+      if (!disposed && typeof focus?.id === 'string' && typeof focus.request === 'string') { setNoteRequest({ id: focus.id, request: focus.request }); setView('notes'); }
+    };
+    const changed = (changes: Record<string, chrome.storage.StorageChange>, area: string) => { if (area === 'session' && changes[key]) accept(changes[key]?.newValue); };
+    chrome.storage.onChanged.addListener(changed);
+    void chrome.windows.getCurrent().then(async window => { key = `notes:focus:${window.id}`; accept((await chrome.storage.session.get(key))[key]); });
+    return () => { disposed = true; chrome.storage.onChanged.removeListener(changed); };
+  }, []);
+
   useEffect(() => {
     const refresh = () => { void rpc<Preferences>('public:preferences').then(setPreferences).catch(() => undefined); };
     const changed = (changes: Record<string, chrome.storage.StorageChange>, area: string) => { if (area === 'local' && changes.settings) refresh(); };
@@ -86,7 +100,7 @@ function Panel() {
   return <div className="selio-root panel-shell" data-theme={theme} lang={preferences.uiLanguage}>
     <nav className="panel-navigation" aria-label={t('侧边栏导航')}><button aria-pressed={view === 'chat'} onClick={() => setView('chat')}><MessageSquare size={15} aria-hidden="true"/>{t('对话')}</button><button aria-pressed={view === 'notes'} onClick={() => setView('notes')}><Bookmark size={15} aria-hidden="true"/>{t('收藏笔记')}</button></nav>
     <div className="panel-chat-view" hidden={view !== 'chat'}>{tabId !== null ? <PanelChat key={tabId} tabId={tabId}/> : <div className="chat-empty"><p>{t("请打开一个网页，开始阅读。")}</p></div>}</div>
-    {view === 'notes' && <NotesList language={preferences.uiLanguage}/>}
+    <div className="panel-notes-view" hidden={view !== 'notes'}><NotesList language={preferences.uiLanguage} active={view === 'notes'} request={noteRequest}/></div>
   </div>;
 }
 createRoot(document.getElementById('root')!).render(<Panel/>);

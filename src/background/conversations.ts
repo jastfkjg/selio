@@ -2,14 +2,16 @@ import { LIMITS, type Conversation, type SelectionSnapshot, type Preferences, ty
 import { builtinAction, validatePrompt } from '../shared/actions';
 import { sanitizeSnapshot, cleanText } from '../shared/validation';
 import { selectPageContext } from '../page/context';
-import type { PageSnapshot } from '../shared/types';
+import type { GenerationInfo, PageSnapshot } from '../shared/types';
 import { buildMessages } from '../llm/prompts';
 import { ApiError, errorMessage } from '../llm/errors';
 
-export interface GenerationContext { modelId: string; modelName: string; stream: (messages: ApiMessage[], signal: AbortSignal) => AsyncIterable<string> }
+export interface GenerationContext extends GenerationInfo { stream: (messages: ApiMessage[], signal: AbortSignal) => AsyncIterable<string> }
 interface EngineDependencies {
   generate: (modelId: string | null, action: Action, actionName?: string) => Promise<GenerationContext>;
   publish: (conversation: Conversation) => void;
+  /** A synchronous consumer; clone only the message being sent or a persistence checkpoint. */
+  progress?: (conversation: Conversation) => void;
 }
 /** One owner per tab, with request identity checked after every async boundary. */
 export class ConversationEngine {
@@ -228,16 +230,28 @@ export class ConversationEngine {
   }
   private async run(state: Conversation, requestId: string, messages: ApiMessage[], controller: AbortController) {
     const current = () => this.get(state.tabId)?.id === state.id && state.requestId === requestId && !controller.signal.aborted;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let lastPublish = -Infinity;
+    const flush = () => {
+      clearTimeout(timer); timer = undefined;
+      if (!current()) return;
+      lastPublish = Date.now(); state.updatedAt = lastPublish;
+      if (this.dependencies.progress) this.dependencies.progress(state);
+      else this.emit(state);
+    };
     try {
       const generation = await this.dependencies.generate(state.modelId, state.action, state.mode === 'general' ? 'AI Chat' : state.page ? 'Ask This Page' : state.template?.name);
       if (!current()) return;
       state.modelId = generation.modelId;
       state.modelName = generation.modelName;
       const answer = state.messages.at(-1)!;
+      answer.generation = { modelId: generation.modelId, modelName: generation.modelName, ...(generation.model ? { model: generation.model } : {}), ...(generation.provider ? { provider: generation.provider } : {}) };
       for await (const chunk of generation.stream(messages, controller.signal)) {
         if (!current()) return;
         answer.content += chunk.slice(0, LIMITS.output - answer.content.length);
-        this.emit(state);
+        // Show the first token immediately, then batch bursts to at most 25 updates/s.
+        if (Date.now() - lastPublish >= 40) flush();
+        else timer ??= setTimeout(flush, 40 - (Date.now() - lastPublish));
         if (answer.content.length >= LIMITS.output) throw new ApiError('limit', '回答已达到长度上限，请继续追问。');
       }
       if (!current()) return;
@@ -248,6 +262,7 @@ export class ConversationEngine {
       state.status = 'error';
       state.error = errorMessage(error);
     } finally {
+      clearTimeout(timer);
       if (current()) {
         this.running.delete(state.tabId);
         delete state.requestId;

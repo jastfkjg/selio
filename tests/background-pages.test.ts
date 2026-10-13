@@ -34,6 +34,7 @@ function deferred<T>() {
 async function setup(initial?: Conversation) {
   const mock = {
     storage: {
+      onChanged: event<(changes: Record<string, chrome.storage.StorageChange>, area: string) => void>(),
       local: area({ keyStorageVersion: 2, 'key:model': 'test-key', settings: { preferences: DEFAULT_PREFERENCES, actions: DEFAULT_ACTIONS, defaultModelId: 'model', models: [{ id: 'model', name: 'Model', model: 'test-model', provider: 'custom', baseUrl: 'https://api.example.com/v1', keyStorage: 'local', maxTokens: 2048 }] } }),
       session: area(initial ? { [`conversation:${tabId}`]: initial } : {}),
     },
@@ -43,7 +44,7 @@ async function setup(initial?: Conversation) {
       onMessage: event<(message: { type: string; payload: unknown }, sender: chrome.runtime.MessageSender, respond: (reply: { ok: boolean; error?: string }) => void) => void>(),
     },
     tabs: {
-      query: vi.fn(async () => [{ id: tabId, url }]), get: vi.fn(async () => ({ id: tabId, url })),
+      query: vi.fn(async () => [{ id: tabId, url }]), get: vi.fn(async () => ({ id: tabId, url, windowId: 10 })),
       sendMessage: vi.fn(async (_tabId: number, message: { type: string }): Promise<{ page?: PageSnapshot; error?: string }> => message.type === 'selio:extract-page' ? { page } : {}),
       onRemoved: event<(id: number) => void>(), onUpdated: event<(id: number, info: { status?: string; url?: string }) => void>(),
     },
@@ -58,11 +59,11 @@ async function setup(initial?: Conversation) {
   background.default.main();
   const port = {
     name: 'selio-chat', sender: { id: 'selio', url: mock.runtime.getURL('sidepanel.html') },
-    onMessage: event<(message: ChatCommand | { type: 'subscribe'; tabId: number }) => void>(),
+    onMessage: event<(message: ChatCommand | { type: 'subscribe'; tabId: number } | { type: 'ping' }) => void>(),
     onDisconnect: event<() => void>(), postMessage: vi.fn<(message: ServerEvent) => void>(),
   };
   mock.runtime.onConnect.listeners[0]!(port as unknown as chrome.runtime.Port);
-  const send = (command: ChatCommand | { type: 'subscribe'; tabId: number }) => port.onMessage.listeners[0]!(command);
+  const send = (command: ChatCommand | { type: 'subscribe'; tabId: number } | { type: 'ping' }) => port.onMessage.listeners[0]!(command);
   send({ type: 'subscribe', tabId });
   await vi.waitFor(() => expect(port.postMessage.mock.calls.some(([event]) => event.type === 'preferences')).toBe(true));
   const state = () => port.postMessage.mock.calls.map(([event]) => event).filter(event => event.type === 'state').at(-1)?.conversation;
@@ -200,4 +201,43 @@ it('rejects disabled actions and does not start a hidden default when all action
   expect(app.state()).toEqual(initial);
   const { trackedStream } = await import('../src/background/usage');
   expect(trackedStream).not.toHaveBeenCalled();
+});
+
+it('opens a saved note through a window-scoped sidebar request and broadcasts note invalidation', async () => {
+  const app = await setup(selectionChat());
+  await app.rpc('notes:save', { tabId, conversationId: 'selection-chat', messageId: 'answer' });
+  const notes = (await app.mock.storage.local.get('notes')).notes as import('../src/shared/types').SavedNote[];
+  expect(await app.rpc('notes:open', { tabId, id: notes[0]!.id })).toEqual({ ok: true });
+  expect((await app.mock.storage.session.get('notes:focus:10'))['notes:focus:10']).toMatchObject({ id: notes[0]!.id });
+  app.mock.storage.onChanged.listeners[0]!({ notes: { newValue: notes } }, 'local');
+  expect(app.port.postMessage).toHaveBeenLastCalledWith({ type: 'notes-changed' });
+});
+it('scopes content-script draft and edit access to its own saved conversation', async () => {
+  const app = await setup(selectionChat());
+  await app.rpc('notes:save', { tabId, conversationId: 'selection-chat', messageId: 'answer' });
+  const [note] = (await app.mock.storage.local.get('notes')).notes as import('../src/shared/types').SavedNote[];
+  const sender = { id: 'selio', url, tab: { id: 2 }, frameId: 0 } as chrome.runtime.MessageSender;
+  const send = (type: string, payload: unknown) => new Promise<{ ok: boolean; error?: string }>(resolve => app.mock.runtime.onMessage.listeners[0]!({ type, payload }, sender, resolve));
+  const reference = { id: note!.id, conversationId: note!.conversationId, messageId: note!.messageId };
+  expect((await send('notes:draft:get', reference)).ok).toBe(false);
+  expect((await send('notes:update', { ...reference, note: 'Wrong tab', tags: [] })).ok).toBe(false);
+  sender.tab!.id = tabId;
+  expect((await send('notes:draft:set', { ...reference, draft: { text: 'Draft', labels: 'tag', version: 'v1' } })).ok).toBe(true);
+  expect((await send('notes:update', { ...reference, note: 'Draft', tags: ['tag'], draftVersion: 'v1' })).ok).toBe(true);
+  expect((await app.mock.storage.local.get('notes')).notes).toMatchObject([{ note: 'Draft', tags: ['tag'] }]);
+});
+
+it('answers heartbeats without retransmitting the conversation', async () => {
+  const app = await setup(selectionChat());
+  app.port.postMessage.mockClear();
+  app.send({ type: 'ping' });
+  expect(app.port.postMessage.mock.calls).toEqual([[{ type: 'pong' }]]);
+});
+it('ignores buffered drafts from an action that is no longer active', async () => {
+  const app = await setup(selectionChat());
+  app.send({ type: 'draft', conversationId: 'selection-chat', action: 'explain', scope: 'selection', text: 'stale' });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(app.state()?.draft).toBe('Kept draft');
+  app.send({ type: 'draft', conversationId: 'selection-chat', action: 'translate', scope: 'selection', text: 'latest' });
+  await vi.waitFor(() => expect(app.state()?.draft).toBe('latest'));
 });

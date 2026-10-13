@@ -41,6 +41,11 @@ test.beforeAll(async () => {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
         const followup = payload.messages.length > 2;
         const pieces = followup ? ['当然。', '可以把注意力理解为一束光，', '帮助我们看清重要的信息。'] : ['注意力是', '理解的起点。', '\n\n当我们放慢脚步，提出更好的问题，', '熟悉的想法也会展现新的可能。'];
+        // Page answers include a real supplied passage so citation navigation is exercised.
+        try {
+          const source = JSON.parse(payload.messages[1]?.content ?? '{}');
+          if (source.passages?.[0]?.id) pieces.push(` [${source.passages[0].id}]`);
+        } catch { /* Ordinary chat has no JSON source. */ }
         let index = 0;
         const interval = setInterval(() => {
           if (index < pieces.length) res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: pieces[index++] } }] })}\n\n`);
@@ -172,14 +177,25 @@ test('install, configure, select, stream, follow up, preserve, cancel and recove
   expect(requests.at(-1)!.messages[1]!.content).not.toContain('A good tool');
   await reading.screenshot({ animations: 'disabled', path: 'test-results/selection-chat.png', fullPage: true });
   await reading.getByRole('button', { name: 'Save', exact: true }).click();
-  await reading.getByLabel('Your note').fill('A useful reading insight');
-  await reading.getByLabel('Tags', { exact: false }).fill('Reading, AI，Reading');
-  await reading.getByRole('button', { name: 'Save note', exact: true }).click();
-  await expect(reading.getByRole('button', { name: 'Saved', exact: true })).toBeVisible();
-  await reading.getByRole('button', { name: 'Saved', exact: true }).click();
-  await expect(reading.getByLabel('Your note')).toHaveValue('A useful reading insight');
+  await expect(reading.getByText('Saved', { exact: true })).toBeVisible();
+  await expect(reading.getByLabel('My note')).toHaveCount(0);
+  expect(await worker.evaluate(async () => ((await chrome.storage.local.get('notes')).notes as SavedNote[]).length)).toBe(1);
+  await reading.getByRole('button', { name: 'Add note', exact: true }).click();
+  await reading.getByLabel('My note').fill('A useful reading insight');
+  await reading.getByLabel('Tags', { exact: true }).fill('Reading, AI，Reading');
+  // Escape closes only the editor and flushes its draft, leaving the answer visible.
+  await reading.getByLabel('Tags', { exact: true }).press('Escape');
+  await expect(reading.getByRole('dialog', { name: 'Selio conversation' })).toBeVisible();
+  await expect.poll(async () => ((await worker.evaluate(async () => (await chrome.storage.local.get('notes')).notes as SavedNote[]))[0]?.note)).toBe('A useful reading insight');
+  await reading.getByRole('button', { name: 'Edit note', exact: true }).click();
+  await expect(reading.getByLabel('My note')).toHaveValue('A useful reading insight');
   await reading.screenshot({ animations: 'disabled', path: 'test-results/save-note.png', fullPage: true });
-  await reading.getByRole('button', { name: 'Save note', exact: true }).click();
+  await reading.getByRole('button', { name: 'Close panel and keep conversation', exact: true }).click();
+  await select(reading);
+  await reading.getByRole('button', { name: 'Read selected text with Selio', exact: true }).click();
+  await reading.getByRole('button', { name: 'Edit note', exact: true }).click();
+  await expect(reading.getByLabel('My note')).toHaveValue('A useful reading insight');
+  await reading.getByRole('button', { name: 'Close editor', exact: true }).click();
   const notes = await worker.evaluate(async () => (await chrome.storage.local.get('notes')).notes as SavedNote[]);
   expect(notes).toHaveLength(1);
   expect(notes[0]).toMatchObject({ selection: await reading.locator('#source').innerText(), sourceUrl: origin + '/', sourceTitle: 'Notes on attention', note: 'A useful reading insight', tags: ['Reading', 'AI'] });
@@ -347,6 +363,16 @@ test('side panel reuses the same conversation without another request', async ()
     await command('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
     await command('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
   };
+  // Save the current answer, jump straight to its detail, then remove this temporary note.
+  await click('.message-assistant:last-of-type .save-button');
+  await expect.poll(() => evaluate<number>('document.querySelectorAll(".message-assistant:last-of-type .saved-status").length')).toBe(1);
+  await click('.message-assistant:last-of-type .save-answer-tools button:last-child');
+  await expect.poll(() => evaluate<string>('document.querySelector(".note-detail .markdown")?.textContent || ""')).toContain('帮助我们看清重要的信息');
+  await click('.note-delete > .text-button');
+  await click('.note-delete .danger-button');
+  await expect.poll(() => evaluate<number>('document.querySelectorAll(".note-row").length')).toBe(1);
+  await click('.panel-navigation button:first-child');
+  await expect.poll(() => evaluate<number>('document.querySelectorAll(".message-assistant:last-of-type .save-button").length')).toBe(1);
   await click('.panel-navigation button:last-child');
   await expect.poll(() => evaluate<number>('document.querySelectorAll(".note-row").length')).toBe(1);
   await click('#notes-search'); await command('Input.insertText', { text: 'unmatched-keyword' });
@@ -354,6 +380,9 @@ test('side panel reuses the same conversation without another request', async ()
   await click('.notes-empty button');
   await click('#notes-search'); await command('Input.insertText', { text: 'reading insight' });
   await expect.poll(() => evaluate<number>('document.querySelectorAll(".note-row").length')).toBe(1);
+  await expect.poll(() => evaluate<string>('document.querySelector(".note-match")?.textContent || ""')).toContain('Matched in Note');
+  await expect.poll(() => evaluate<number>('document.querySelectorAll(".note-match mark").length')).toBeGreaterThan(0);
+  await click('.notes-filter-toggle');
   await click('#notes-source');
   await click('[role="option"]:last-child');
   await expect.poll(() => evaluate<number>('document.querySelectorAll(".note-row").length')).toBe(1);
@@ -368,17 +397,28 @@ test('side panel reuses the same conversation without another request', async ()
   expect(markdown).toContain('A useful reading insight'); expect(markdown).toContain(origin + '/');
   expect(markdown).toContain('熟悉的想法'); expect(markdown).toContain('Reading, AI');
   await rm(downloads, { recursive: true, force: true });
-  await click('.note-row');
+  await click('.note-row-open');
   await expect.poll(() => evaluate<string>('document.querySelector(".note-detail").innerText')).toContain('Attention is the beginning');
 
-  await click('.note-detail > button.text-button:last-of-type');
+  await click('.note-personal-heading button');
   await expect.poll(() => evaluate<boolean>('Boolean(document.querySelector(".note-editor"))')).toBe(true);
   await click('.note-editor textarea');
   await command('Input.insertText', { text: 'Edited: ' });
-  await click('.note-editor button[type="submit"]');
+  // Switching to chat and back preserves the editor and its pending changes.
+  await click('.panel-navigation button:first-child');
+  await click('.panel-navigation button:last-child');
+  await expect.poll(() => evaluate<string>('document.querySelector(".note-editor textarea")?.value || ""')).toContain('Edited:');
+  await expect.poll(() => evaluate<string>('document.querySelector(".note-editor-footer")?.textContent || ""')).toContain('Saved automatically');
+  await click('.note-editor-heading button');
   await expect.poll(() => evaluate<string>('document.querySelector(".note-content")?.textContent || ""')).toContain('Edited:');
   const detailScreenshot = await command<{ data: string }>('Page.captureScreenshot', { format: 'png' });
   await writeFile('test-results/saved-note-detail.png', Buffer.from(detailScreenshot.data, 'base64'));
+  await click('.notes-heading > .icon-button');
+  expect(await evaluate<string>('document.querySelector("#notes-search").value')).toBe('reading insight');
+  expect(await evaluate<string>('document.querySelector("#notes-source").innerText')).toContain('127.0.0.1');
+  await click('.note-row .note-tags > button');
+  expect(await evaluate<string>('document.querySelector(".active-note-filters").innerText')).toContain('Reading');
+
   await click('.panel-navigation button:first-child');
   await expect.poll(async () => (await inspect()).draft).toBe('保留这个草稿');
   expect(requests.length).toBe(count);
@@ -908,12 +948,14 @@ test('Ask This Page extracts without selection, exposes request evidence and ref
   expect(JSON.stringify(source)).not.toContain('private input');
   expect(JSON.stringify(source)).not.toContain('editable text');
   expect(source.coverage.partial).toBe(false);
-  await click('Passages used for this answer', 'summary');
+  await click('View source passage 1', '.citation-button');
   await expect.poll(text).toContain('All extracted text was provided.');
-  await click('[1]', '.message-assistant summary');
+  expect(await evaluate<boolean>(`document.activeElement?.closest('[data-passage-id="1"]') !== null`)).toBe(true);
   await expect.poll(text).toContain('Attention is the beginning');
   expect(await evaluate<boolean>('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
   await writeFile('test-results/ask-page-evidence.png', Buffer.from((await command<{ data: string }>('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+  await click('Save', '.message-assistant .save-button');
+  await expect.poll(() => worker.evaluate(async () => ((await chrome.storage.local.get('notes')).notes as SavedNote[]).some(note => note.mode === 'page' && note.evidence?.page.chunks.length))).toBe(true);
   // An extraction failure must preserve the conversation, and must not call a model.
   await page.evaluate(() => { document.body.innerHTML = '<canvas></canvas>'; });
   await click('Refresh page');
@@ -925,6 +967,16 @@ test('Ask This Page extracts without selection, exposes request evidence and ref
   expect(await evaluate<boolean>('document.querySelector("textarea").disabled')).toBe(true);
   await click('Refresh page');
   await expect.poll(text).toContain('What would you like to know?');
+  expect(requests.length).toBe(before + 1);
+  // The new conversation no longer owns the old answer: its saved evidence still works.
+  await click('Saved notes', '.panel-navigation button');
+  await click('What is this article mainly about?', '.note-row-open');
+  await click('View source passage 1', '.note-detail .citation-button');
+  await expect.poll(text).toContain('saved for offline review');
+  await expect.poll(text).toContain('Attention is the beginning');
+  expect(await evaluate<boolean>('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+  await writeFile('test-results/saved-evidence.png', Buffer.from((await command<{ data: string }>('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+  await click('Chat', '.panel-navigation button');
   expect(requests.length).toBe(before + 1);
   // Retrieve an implementation section near the end, rather than just the opening DOM text.
   await page.evaluate(() => {
@@ -957,7 +1009,7 @@ test('Ask This Page extracts without selection, exposes request evidence and ref
   await click('Use current page');
   await expect.poll(text).toContain('How can I help?');
   expect(await evaluate<boolean>('document.querySelector("[role=switch]").getAttribute("aria-checked") === "false"')).toBe(true);
-  expect(await evaluate<number>('document.querySelectorAll(".page-context, .action-toolbar, .message").length')).toBe(0);
+  expect(await evaluate<number>('document.querySelector(".panel-chat-view").querySelectorAll(".page-context, .action-toolbar, .message").length')).toBe(0);
   await writeFile('test-results/general-chat-dark.png', Buffer.from((await command<{ data: string }>('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
   await click('', 'textarea');
   await command('Input.insertText', { text: 'hi' });

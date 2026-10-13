@@ -46,7 +46,16 @@ export interface SavedNote {
   id: string; conversationId: string; messageId: string;
   selection: string; sourceUrl: string; sourceTitle: string; answer: string;
   note: string; tags: string[]; createdAt: number; updatedAt: number;
+  question?: string; action?: Action; actionName?: string; mode?: 'selection' | 'page' | 'general'; incomplete?: boolean;
+  evidence?: SavedEvidence;
+  generation?: GenerationInfo;
 }
+export interface SavedEvidence {
+  page: Omit<PageSnapshot, 'title' | 'url' | 'stale'>;
+  context: PageContext;
+  totalChunks: number;
+}
+export interface NoteDraft { text: string; labels: string; version: string }
 export interface PageChunk { id: number; heading: string; text: string; start: number; end: number }
 export interface PageSnapshot {
   title: string; url: string; capturedAt: number; method: 'readability' | 'semantic';
@@ -54,7 +63,8 @@ export interface PageSnapshot {
   chunks: PageChunk[]; totalCharacters: number; truncated: boolean; stale?: boolean;
 }
 export interface PageContext { mode: 'full' | 'retrieval' | 'overview'; chunkIds: number[]; characters: number }
-export interface Message { pageContext?: PageContext; id: string; role: 'user' | 'assistant'; content: string; stopped?: boolean }
+export interface GenerationInfo { modelId: string; modelName: string; model?: string; provider?: Provider }
+export interface Message { pageContext?: PageContext; generation?: GenerationInfo; id: string; role: 'user' | 'assistant'; content: string; stopped?: boolean }
 export type ConversationBranch = Pick<Conversation, 'messages' | 'draft' | 'status' | 'error' | 'modelId' | 'modelName' | 'selection' | 'template' | 'prompt' | 'promptDraft' | 'editingStatus'>;
 export interface Conversation {
   mode?: 'general';
@@ -91,6 +101,9 @@ export interface ChatCommand {
   scope?: Scope;
 }
 export type ServerEvent =
+  | { type: 'pong' }
+  | { type: 'progress'; conversationId: string; requestId: string; message: Message; modelId: string | null; modelName: string; updatedAt: number }
+  | { type: 'notes-changed' }
   | { type: 'state'; conversation: Conversation | null }
   | { type: 'error'; error: string }
   | { type: 'preferences'; preferences: Preferences; modelName: string; models: PublicModel[]; actions: PublicAction[] };

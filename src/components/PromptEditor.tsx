@@ -23,7 +23,7 @@ export function PromptEditor({ session }: { session: ChatSession }) {
     catch (e) { setError((e as Error).message); }
   }}>
     <div className="prompt-editor-body"><div><h2>{t('编辑本次 Prompt')}</h2><p>{t('只影响本次对话，不会修改保存的模板。执行后将替换当前操作的回答。')}</p></div>
-    <label htmlFor={`prompt-${chat.id}`}>{t('Prompt 模板')}</label><textarea id={`prompt-${chat.id}`} className="prompt-textarea" rows={8} value={text} maxLength={8000} required spellCheck={false} disabled={!connected} onChange={e => { const value = e.target.value; pending.current = value; setText(value); send({ type: 'prompt-draft', text: value }); }}/>
+    <label htmlFor={`prompt-${chat.id}`}>{t('Prompt 模板')}</label><textarea id={`prompt-${chat.id}`} className="prompt-textarea" rows={8} value={text} maxLength={8000} required spellCheck={false} onBlur={session.flushDraft} disabled={!connected} onChange={e => { const value = e.target.value; pending.current = value; setText(value); send({ type: 'prompt-draft', text: value }); }}/>
     <small>{t('{{selection}} 使用选中文字；{{language}} 使用目标语言。')}</small>
     <details className="prompt-preview"><summary>{t('预览本次 Prompt')}</summary><pre>{resolvePrompt(text, chat.selection.text, chat.language)}</pre></details>
     <label htmlFor={`prompt-model-${chat.id}`}>{t('执行模型')}</label><Select id={`prompt-model-${chat.id}`} value={chat.modelId ?? ''} disabled={!connected || !session.models.length} onChange={e => { if (e.nativeEvent.isTrusted) send({ type: 'model', modelId: e.target.value }); }}>{session.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</Select>

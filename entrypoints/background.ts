@@ -1,28 +1,36 @@
 import { defineBackground } from 'wxt/utils/define-background';
 import { ConversationEngine } from '../src/background/conversations';
-import { clearNotes, deleteNote, readNotes, saveAnswer, updateNote } from '../src/background/notes';
+import { clearNoteDraft, clearNotes, deleteNote, readNoteDraft, readNotes, saveAnswer, updateNote, writeNoteDraft } from '../src/background/notes';
 import { deleteAction, reorderActions, saveAction, deleteModel, mutateSettings, protectStorage, readKey, readSaved, saveModel, savePreferences, setDefault, settingsView } from '../src/background/repository';
 import { translator } from '../src/shared/i18n';
 import { clearUsage, readUsage, recoverUsage, trackedStream } from '../src/background/usage';
 import { ApiError, errorMessage } from '../src/llm/errors';
 import { isAction, matchesSitePattern, originPattern, siteDisabled } from '../src/shared/validation';
 import { ALL_SITES } from '../src/shared/types';
+import { progressEvent } from '../src/shared/chat-updates';
 import type { ChatCommand, Conversation, PageSnapshot, SelectionSnapshot, ServerEvent } from '../src/shared/types';
 
 export default defineBackground(() => {
   const ports = new Map<chrome.runtime.Port, number>();
   const saveTimers = new Map<number, ReturnType<typeof setTimeout>>();
   const writeQueues = new Map<number, Promise<void>>();
+  const pendingSaves = new Map<number, Conversation>();
   function persist(state: Conversation) {
+    pendingSaves.set(state.tabId, state);
     if (state.status === 'generating' && saveTimers.has(state.tabId)) return;
     clearTimeout(saveTimers.get(state.tabId));
     const save = () => {
       saveTimers.delete(state.tabId);
+      const latest = pendingSaves.get(state.tabId);
+      pendingSaves.delete(state.tabId);
+      if (!latest) return;
+      const snapshot = structuredClone(latest);
       const previous = writeQueues.get(state.tabId) ?? Promise.resolve();
-      const next = previous.then(() => chrome.storage.session.set({ [`conversation:${state.tabId}`]: state })).catch(() => {
+      const next = previous.then(() => chrome.storage.session.set({ [`conversation:${state.tabId}`]: snapshot })).catch(() => {
         for (const [port, id] of ports) if (id === state.tabId) post(port, { type: 'error', error: '浏览器会话存储已满，当前对话暂时无法恢复。可在设置中清除数据。' });
       });
       writeQueues.set(state.tabId, next);
+      void next.then(() => { if (writeQueues.get(state.tabId) === next) writeQueues.delete(state.tabId); });
     };
     if (state.status === 'generating') saveTimers.set(state.tabId, setTimeout(save, 400));
     else save();
@@ -38,11 +46,16 @@ export default defineBackground(() => {
       const key = await readKey(model);
       if (!key) throw new ApiError('key_missing', model.keyStorage === 'session' ? '会话密钥已过期，请在设置中重新输入 API Key。' : '未找到 API Key，请在设置中重新输入并保存。');
       if (!await chrome.permissions.contains({ origins: [originPattern(model.baseUrl)] })) throw new ApiError('permission', '尚未授权模型 API 来源，请在设置中编辑并保存模型以授权。');
-      return { modelId: model.id, modelName: model.name, stream: (messages, signal) => trackedStream(model, key, messages, signal, action, actionName) };
+      return { modelId: model.id, modelName: model.name, model: model.model, provider: model.provider, stream: (messages, signal) => trackedStream(model, key, messages, signal, action, actionName) };
     },
     publish(state) {
       persist(state);
       for (const [port, tabId] of ports) if (tabId === state.tabId) post(port, { type: 'state', conversation: state });
+    },
+    progress(state) {
+      persist(state);
+      const event = progressEvent(state);
+      for (const [port, tabId] of ports) if (tabId === state.tabId) post(port, event);
     },
   });
   const ready = protectStorage().then(async () => {
@@ -202,7 +215,7 @@ export default defineBackground(() => {
     port.onDisconnect.addListener(() => ports.delete(port));
     port.onMessage.addListener(message => {
       if (!message || typeof message !== 'object') return;
-      if (message.type === 'ping') { post(port, { type: 'state', conversation: engine.get(ports.get(port) ?? -1) }); return; }
+      if (message.type === 'ping') { post(port, { type: 'pong' }); return; }
       if (message.type === 'subscribe') {
         const tabId = content(port.sender ?? {}) ? port.sender!.tab!.id! : message.tabId;
         if (!Number.isInteger(tabId) || tabId < 0) return;
@@ -222,6 +235,11 @@ export default defineBackground(() => {
       if (!trusted(port.sender ?? {}, ['sidepanel.html']) && (engine.get(tabId)?.page || engine.get(tabId)?.mode === 'general') && command.type !== 'start' && command.type !== 'stop') return;
       const previous = tabQueues.get(tabId) ?? ready;
       const next = previous.then(async () => {
+        if (command.type === 'draft' || command.type === 'prompt-draft') {
+          const state = engine.get(tabId);
+          // A delayed draft must never overwrite another action/scope's draft.
+          if (command.action !== undefined && command.action !== state?.action || command.scope !== undefined && command.scope !== state?.scope) return;
+        }
         if (command.type === 'ask' || command.type === 'retry') {
           const state = engine.get(tabId);
           if (state?.page && (await chrome.tabs.get(tabId)).url !== state.page.url) engine.stalePage(tabId);
@@ -275,12 +293,26 @@ export default defineBackground(() => {
     });
   });
 
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.notes) for (const port of ports.keys()) post(port, { type: 'notes-changed' });
+  });
+
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!message || typeof message.type !== 'string' || sender.id !== chrome.runtime.id) return;
-    if (message.type === 'chat:pin') {
+    if (message.type === 'chat:pin' || message.type === 'notes:open') {
       const tabId = content(sender) ? sender.tab!.id : trusted(sender) ? message.payload?.tabId : undefined;
       if (!Number.isInteger(tabId)) { respond({ ok: false, error: '无法打开当前标签页的侧边栏。' }); return; }
-      void chrome.sidePanel.open({ tabId }).then(() => respond({ ok: true }), () => respond({ ok: false, error: '侧边栏未能打开，请再次点击，或使用 Chrome 的侧边栏入口。' }));
+      void chrome.sidePanel.open({ tabId }).then(async () => {
+        if (message.type === 'notes:open') {
+          await ready;
+          const state = engine.get(tabId);
+          const note = (await readNotes()).find(item => item.id === message.payload?.id);
+          if (!note || (content(sender) && note.conversationId !== state?.id)) throw new Error('收藏不存在，请刷新列表。');
+          const tab = await chrome.tabs.get(tabId);
+          await chrome.storage.session.set({ [`notes:focus:${tab.windowId}`]: { id: note.id, request: crypto.randomUUID() } });
+        }
+        respond({ ok: true });
+      }).catch(error => respond({ ok: false, error: error instanceof Error ? error.message : '侧边栏未能打开，请再次点击，或使用 Chrome 的侧边栏入口。' }));
       return true;
     }
     void (async () => {
@@ -296,6 +328,20 @@ export default defineBackground(() => {
         if (message.type === 'notes:find') return (await readNotes()).find(item => item.conversationId === state.id && item.messageId === p.messageId) ?? null;
         return saveAnswer(state, p.messageId, p.note, p.tags);
       }
+      if (['notes:update', 'notes:draft:get', 'notes:draft:set'].includes(message.type) && (content(sender) || trusted(sender))) {
+        const p = message.payload;
+        const note = (await readNotes()).find(item => item.id === p?.id);
+        if (!note) throw new Error('收藏不存在，请刷新列表。');
+        if (content(sender)) {
+          const state = engine.get(sender.tab!.id!);
+          if (!state || state.id !== note.conversationId || state.id !== p.conversationId || note.messageId !== p.messageId) throw new Error('会话已切换，请在当前会话重试。');
+        }
+        if (message.type === 'notes:draft:get') return readNoteDraft(note.id);
+        if (message.type === 'notes:draft:set') return writeNoteDraft(note.id, p.draft);
+        const updated = await updateNote(note.id, p.note, p.tags);
+        if (typeof p.draftVersion === 'string') await clearNoteDraft(note.id, p.draftVersion);
+        return updated;
+      }
       if (!trusted(sender)) throw new Error('此操作只能从 Selio 设置或扩展页面发起。');
       const p = message.payload;
       switch (message.type) {
@@ -310,8 +356,7 @@ export default defineBackground(() => {
           return;
         }
         case 'notes:list': return readNotes();
-        case 'notes:update': return updateNote(p?.id, p?.note, p?.tags);
-        case 'notes:delete': return deleteNote(p?.id);
+        case 'notes:delete': await deleteNote(p?.id); if (typeof p?.id === 'string') await clearNoteDraft(p.id); return;
         case 'page:load': {
           if (!trusted(sender, ['sidepanel.html']) || !Number.isInteger(p?.tabId)) throw new Error('标签页无效。');
           if (p.ensure && engine.get(p.tabId)) return;
@@ -405,6 +450,7 @@ export default defineBackground(() => {
           engine.clear();
           for (const timer of saveTimers.values()) clearTimeout(timer);
           saveTimers.clear();
+          pendingSaves.clear();
           await Promise.all(writeQueues.values());
           await clearUsage();
           await clearNotes();
@@ -424,6 +470,7 @@ export default defineBackground(() => {
     navigationVersions.set(tabId, (navigationVersions.get(tabId) ?? 0) + 1);
     engine.remove(tabId);
     clearTimeout(saveTimers.get(tabId)); saveTimers.delete(tabId);
+    pendingSaves.delete(tabId);
     void (writeQueues.get(tabId) ?? Promise.resolve()).then(() => chrome.storage.session.remove(`conversation:${tabId}`));
   });
   chrome.tabs.onUpdated.addListener((tabId, info) => {

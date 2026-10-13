@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { filterNotes, notesMarkdown, parseTags, sourceUrl, validateNoteDetails } from '../src/shared/notes';
+import { filterNotes, noteActionLabel, noteMatches, notesMarkdown, noteTitle, parseTags, sourceUrl, validateNoteDetails } from '../src/shared/notes';
 import { sanitizeSnapshot } from '../src/shared/validation';
 import type { Conversation, SavedNote } from '../src/shared/types';
 
 function area() {
   const data: Record<string, unknown> = {};
-  return { data, get: vi.fn(async (key: string) => structuredClone({ [key]: data[key] })), set: vi.fn(async (values: Record<string, unknown>) => { Object.assign(data, structuredClone(values)); }), setAccessLevel: vi.fn(async () => undefined) };
+  return { data, get: vi.fn(async (key: string) => structuredClone({ [key]: data[key] })), set: vi.fn(async (values: Record<string, unknown>) => { Object.assign(data, structuredClone(values)); }), remove: vi.fn(async (key: string) => { delete data[key]; }), setAccessLevel: vi.fn(async () => undefined) };
 }
 let local: ReturnType<typeof area>;
 beforeEach(() => { vi.resetModules(); local = area(); vi.stubGlobal('chrome', { storage: { local, session: area() } }); });
@@ -16,6 +16,40 @@ const conversation = (): Conversation => ({
 });
 
 describe('saved answers', () => {
+  it('preserves per-answer evidence and model after navigation, model changes and restart', async () => {
+    const repo = await import('../src/background/notes');
+    const chat = conversation();
+    chat.page = { title: 'Page title', url: 'https://example.com/page', capturedAt: 123, method: 'readability', totalCharacters: 30, truncated: false, chunks: [
+      { id: 1, heading: 'Unused', text: 'Excluded source', start: 0, end: 15 },
+      { id: 2, heading: 'Evidence', text: 'Original evidence', start: 15, end: 32 },
+    ] };
+    chat.messages[0]!.pageContext = { mode: 'retrieval', chunkIds: [2], characters: 17 };
+    chat.messages[0]!.generation = { modelId: 'original', modelName: 'Original model', model: 'original-v1', provider: 'custom' };
+    chat.messages[0]!.content = 'Claim [2]';
+    chat.pageContext = { mode: 'full', chunkIds: [1, 2], characters: 32 };
+    chat.modelId = 'different'; chat.modelName = 'Different model';
+    const saving = repo.saveAnswer(chat, 'answer');
+    chat.page.chunks[1]!.text = 'Changed after save';
+    chat.messages[0]!.generation.model = 'changed';
+    const note = await saving;
+    expect(note.evidence?.page.chunks).toEqual([{ id: 2, heading: 'Evidence', text: 'Original evidence', start: 15, end: 32 }]);
+    expect(note.evidence?.context.chunkIds).toEqual([2]);
+    expect(note.evidence?.totalChunks).toBe(2);
+    expect(note.generation?.model).toBe('original-v1');
+    const markdown = notesMarkdown([note], 'en');
+    expect(markdown).toContain('#### [2] Evidence');
+    expect(markdown).toContain('> Original evidence');
+    expect(markdown).toContain('original-v1');
+    expect(markdown).not.toContain('Excluded source');
+    vi.resetModules();
+    expect((await (await import('../src/background/notes')).readNotes())[0]?.evidence).toEqual(note.evidence);
+  });
+  it('does not guess evidence or a generation model for legacy answers', async () => {
+    const repo = await import('../src/background/notes');
+    const note = await repo.saveAnswer(conversation(), 'answer');
+    expect(note.evidence).toBeUndefined(); expect(note.generation).toBeUndefined();
+    expect(notesMarkdown([note], 'en')).not.toContain('Generated with');
+  });
   it('snapshots the original selection and source before queued writes, survives restart, and does not duplicate repeated saves', async () => {
     let repo = await import('../src/background/notes');
     const chat = conversation();
@@ -81,4 +115,41 @@ it('searches every saved field, combines keyword and source filters, and exports
   for (const text of [note.sourceTitle, `<${note.sourceUrl}>`, note.selection, note.answer, 'Personal insight', '知识', '> \\# literal heading']) expect(markdown).toContain(text);
   expect(markdown).toContain('### Your note');
   expect(notesMarkdown([note], 'zh-CN')).toContain('### 用户备注');
+});
+
+it('one-click saving never erases annotations and records question, action and incomplete state', async () => {
+  const repo = await import('../src/background/notes');
+  const chat = conversation();
+  chat.messages.unshift({ id: 'q', role: 'user', content: 'Why does this matter?' });
+  chat.messages[1]!.stopped = true;
+  const first = await repo.saveAnswer(chat, 'answer', 'My insight', ['Research']);
+  const again = await repo.saveAnswer(chat, 'answer');
+  expect(again).toMatchObject({ id: first.id, note: 'My insight', tags: ['Research'], question: 'Why does this matter?', action: 'explain', incomplete: true });
+  expect(notesMarkdown([again], 'en')).toContain('Incomplete answer');
+  expect(notesMarkdown([again], 'en')).toContain('Why does this matter?');
+  expect(noteActionLabel(again, 'en')).toBe('Explain');
+  expect(noteTitle(again)).toBe('Why does this matter?');
+});
+it('shows matching snippets even when the keyword is far into an answer and combines tag filters', async () => {
+  const repo = await import('../src/background/notes');
+  const saved = await repo.saveAnswer(conversation(), 'answer', 'A useful insight', ['Reading']);
+  saved.answer = 'Unrelated '.repeat(80) + 'Deep keyword';
+  expect(noteMatches(saved, 'keyword insight')).toEqual(expect.arrayContaining([
+    expect.objectContaining({ field: '回答', text: expect.stringContaining('Deep keyword') }),
+    expect.objectContaining({ field: '备注', text: expect.stringContaining('insight') }),
+  ]));
+  expect(filterNotes([saved], 'keyword', 'example.com', 'Reading')).toEqual([saved]);
+  expect(filterNotes([saved], 'keyword', '', 'Other')).toEqual([]);
+  expect(noteTitle(saved)).toBe('Original selection');
+  expect(noteMatches(saved, 'useful insight')).toHaveLength(1);
+});
+it('keeps a newer draft when an older autosave finishes', async () => {
+  const repo = await import('../src/background/notes');
+  await repo.writeNoteDraft('n', { text: 'Latest', labels: '', version: 'new' });
+  await repo.clearNoteDraft('n', 'old');
+  expect(await repo.readNoteDraft('n')).toMatchObject({ text: 'Latest', version: 'new' });
+  await repo.clearNoteDraft('n', 'new'); expect(await repo.readNoteDraft('n')).toBeNull();
+  await repo.writeNoteDraft('n', { text: 'Old', labels: '', version: 'old' });
+  await Promise.all([repo.clearNoteDraft('n', 'old'), repo.writeNoteDraft('n', { text: 'New', labels: '', version: 'new' })]);
+  expect(await repo.readNoteDraft('n')).toMatchObject({ text: 'New' });
 });
